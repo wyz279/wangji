@@ -4,7 +4,7 @@
 // - memo 固定分成三個分類，照片統一放在最後（AI 不處理照片）
 const STYLES = {
   raw: {
-    name: "原味",
+    name: "原始",
   },
   daily: {
     name: "順稿",

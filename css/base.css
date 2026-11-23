@@ -442,7 +442,8 @@ mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: in
 }
 .article p { margin: 0 0 1.1em; line-height: 2; white-space: pre-wrap; word-break: break-word; }
 .article p:last-of-type { margin-bottom: 0; }
-.para-img { width: 42%; margin: 4px 0 12px; }
+/* clear：新照片要等上一張照片結束才開始，避免文字被左右兩張照片夾成一條窄直排 */
+.para-img { width: 42%; margin: 4px 0 12px; clear: both; }
 .para-img.right { float: right; margin-left: 20px; }
 .para-img.left { float: left; margin-right: 20px; }
 .para-img img {
