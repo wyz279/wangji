@@ -167,38 +167,52 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .msg.selected .chat-sticker { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 8px; }
 
 .sticker-panel {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
-  gap: 6px;
-  max-height: 220px;
-  overflow-y: auto;
-  padding: 8px;
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--bubble);
+  overflow: hidden;
+}
+.stk-tabs { display: flex; gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.stk-tab {
+  border: none;
+  background: transparent;
+  font-size: 1.25rem;
+  padding: 4px 8px;
+  border-radius: 8px;
+  opacity: 0.55;
+}
+.stk-tab.active { opacity: 1; background: var(--paper); box-shadow: inset 0 -2px 0 var(--accent); }
+.stk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+  gap: 2px;
+  max-height: 210px;
+  overflow-y: auto;
+  padding: 6px;
 }
 .stk {
   position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
+  justify-content: center;
   border: none;
   background: transparent;
-  color: var(--ink);
   border-radius: 10px;
-  padding: 6px 2px;
+  padding: 4px;
   cursor: pointer;
 }
-.stk:hover { background: var(--paper); }
-.stk-face { font-size: 34px; line-height: 1.1; height: 42px; display: flex; align-items: center; }
-.stk-face img { max-width: 44px; max-height: 42px; }
-.stk small { font-size: 0.72rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.stk-add .stk-face { filter: none; color: var(--muted); }
+.stk:hover { background: var(--paper); transform: scale(1.12); }
+.stk-face { font-size: 30px; line-height: 1; height: 38px; display: flex; align-items: center; }
+.stk-face img { max-width: 40px; max-height: 38px; }
+.stk-grid .stk-face { filter: none; } /* 面板裡就像鍵盤，不加貼紙描邊，捲動比較順 */
+.stk-add .stk-face { color: var(--muted); }
+.stk-empty { grid-column: 1 / -1; margin: 18px 0; text-align: center; color: var(--muted); font-size: 0.85rem; }
 .stk-del {
   position: absolute;
   top: 0;
-  right: 4px;
+  right: 0;
   width: 18px;
   height: 18px;
   line-height: 18px;
@@ -357,6 +371,25 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 }
 .reader-actions .del { color: #c0392b; border-color: #e3b5ae; }
 
+.reader-actions .on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+/* 原文對照 */
+.compare { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; }
+.cmp-stats { margin: 0 0 12px; font-family: system-ui, sans-serif; font-size: 0.85rem; color: var(--muted); }
+.cmp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 12px 0; border-top: 1px dashed var(--line); }
+.cmp-head { font-family: system-ui, sans-serif; font-size: 0.8rem; font-weight: 600; color: var(--muted); border-top: none; padding-top: 0; }
+.cmp-raw { font-family: system-ui, sans-serif; font-size: 0.9rem; display: flex; flex-direction: column; gap: 6px; }
+.cmp-msg { display: flex; gap: 8px; align-items: flex-start; line-height: 1.6; word-break: break-word; }
+.cmp-time { color: var(--muted); font-size: 0.75rem; flex-shrink: 0; padding-top: 3px; }
+.cmp-thumb { width: 72px; border-radius: 4px; border: 3px solid var(--photo-frame); }
+.cmp-sticker { font-size: 26px; line-height: 1; }
+.cmp-sticker img { width: 36px; }
+.cmp-none { color: var(--muted); font-size: 0.8rem; }
+.cmp-new p { margin: 0; line-height: 1.9; white-space: pre-wrap; }
+.cmp-new ul { margin: 0; padding-left: 1.2em; line-height: 1.9; }
+.cmp-new h4 { margin: 8px 0 2px; font-size: 0.95rem; }
+.cmp-new h4:first-child { margin-top: 0; }
+
 /* 手札編輯 */
 .journal-editor { font-family: system-ui, sans-serif; display: flex; flex-direction: column; gap: 14px; }
 .edit-label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; font-size: 0.9rem; color: var(--muted); }
@@ -375,7 +408,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   resize: vertical;
 }
 
-/* 手札裡的貼紙：歪歪的貼在段落旁，一半凸出紙張邊緣 */
+/* 手札裡的貼紙：歪歪的貼在段落旁（留在紙張框內） */
 .page-sticker {
   font-size: 54px;
   line-height: 1;
@@ -383,10 +416,9 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   margin: 0 0 6px;
 }
 .page-sticker img { width: 80px; height: auto; display: block; }
-.page-sticker.right { float: right; margin-right: -46px; margin-left: 10px; }
-.page-sticker.left { float: left; margin-left: -46px; margin-right: 10px; }
-.memo { position: relative; }
-.memo-stickers { position: absolute; top: -26px; right: -14px; display: flex; gap: 2px; }
+.page-sticker.right { float: right; margin-left: 12px; }
+.page-sticker.left { float: left; margin-right: 12px; }
+.memo-stickers { float: right; display: flex; gap: 4px; margin: 0 0 8px 12px; }
 .memo-stickers .page-sticker { font-size: 44px; }
 .memo-stickers .page-sticker img { width: 64px; }
 
@@ -432,10 +464,10 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 }
 
 @media (max-width: 600px) {
-  .page-sticker.right { margin-right: -14px; }
-  .page-sticker.left { margin-left: -14px; }
+  .cmp-row { grid-template-columns: 1fr; gap: 8px; }
+  .cmp-head { display: none; }
+  .cmp-new { border-left: 3px solid var(--accent); padding-left: 10px; }
   .page-sticker { font-size: 44px; }
-  .memo-stickers { right: -6px; }
   .para-img.right, .para-img.left { float: none; width: 100%; margin: 0 0 12px; }
   .article { padding: 18px; }
   .section, .section:nth-child(even) { flex-direction: column; }

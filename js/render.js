@@ -11,7 +11,7 @@ const Render = (() => {
   }
 
   // 貼圖的樣子：內建是 emoji，自訂是圖片
-  const stickerFace = (m) => (m.blob ? `<img src="${imgURL(m)}" alt="${esc(m.label)}">` : esc(m.emoji));
+  const stickerFace = (m) => (m.blob ? `<img src="${imgURL(m)}" alt="貼圖">` : esc(m.emoji));
 
   // 用 id 算出固定的「隨機」數，讓同一張貼紙每次都貼在一樣的角度和位置
   function hash(str) {
@@ -78,7 +78,7 @@ const Render = (() => {
             m.type === "image"
               ? `<img src="${imgURL(m)}" alt="照片">`
               : m.type === "sticker"
-                ? `<div class="chat-sticker" title="${esc(m.label)}">${stickerFace(m)}</div>`
+                ? `<div class="chat-sticker">${stickerFace(m)}</div>`
                 : `<div class="bubble">${esc(m.content)}</div>`;
         }
         const tag = processing ? `<span class="tag">整理中</span>` : "";
@@ -182,7 +182,7 @@ const Render = (() => {
   function pageSticker(m, side) {
     const h = hash(m.id);
     const rot = (h % 2 ? 1 : -1) * (6 + (h % 9)); // 左歪或右歪 6°～14°
-    return `<span class="page-sticker ${side}" style="--rot:${rot}deg" title="${esc(m.label)}">${stickerFace(m)}</span>`;
+    return `<span class="page-sticker ${side}" style="--rot:${rot}deg">${stickerFace(m)}</span>`;
   }
 
   function articleBody(j, msgMap) {
@@ -208,9 +208,48 @@ const Render = (() => {
     return `<article class="article">${paras}<div class="clear"></div></article>`;
   }
 
-  // nav：{ prev, next } 前一篇／後一篇手札（沒有就是 null）
-  function journal(j, msgMap, nav = {}) {
-    const body = j.style === "memo" ? memoBody(j, msgMap) : articleBody(j, msgMap);
+  // 原文對照：左邊是當時隨手丟的原始紀錄，右邊是 AI 整理後的段落，依時間一段一段對齊
+  function compareBody(j, msgMap) {
+    const originals = j.message_ids
+      .map((id) => msgMap.get(id))
+      .filter(Boolean)
+      .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+    const rawItem = (m) => {
+      const body =
+        m.type === "image"
+          ? `<img class="cmp-thumb" src="${imgURL(m)}" alt="照片">`
+          : m.type === "sticker"
+            ? `<span class="cmp-sticker">${stickerFace(m)}</span>`
+            : esc(m.content);
+      return `<div class="cmp-msg"><span class="cmp-time">${time(m.timestamp)}</span><span>${body}</span></div>`;
+    };
+    const rawChars = originals.filter((m) => m.type === "text").reduce((n, m) => n + m.content.length, 0);
+    const newChars = j.result.sections.reduce((n, s) => n + s.refined_text.length, 0);
+    const stats = `<p class="cmp-stats">原始紀錄 ${originals.length} 則、${rawChars} 字 → 整理後 ${j.result.sections.length} ${j.style === "memo" ? "個分類" : "段"}、${newChars} 字</p>`;
+    const head = `<div class="cmp-row cmp-head"><div>原始紀錄</div><div>整理後（${STYLES[j.style].name}）</div></div>`;
+
+    let rows;
+    if (j.style === "memo") {
+      const blocks = j.result.sections.map((s) => `<h4>${esc(s.section_title || "")}</h4>${textBlock(s.refined_text)}`).join("");
+      rows = `<div class="cmp-row"><div class="cmp-raw">${originals.map(rawItem).join("")}</div><div class="cmp-new">${blocks}</div></div>`;
+    } else {
+      const groups = j.result.sections.map(() => []);
+      originals.forEach((m) => groups[sectionFor(m.timestamp, j.result.sections, j.range[0])].push(m));
+      rows = j.result.sections
+        .map(
+          (s, i) => `<div class="cmp-row">
+            <div class="cmp-raw">${groups[i].map(rawItem).join("") || `<span class="cmp-none">（無）</span>`}</div>
+            <div class="cmp-new">${textBlock(s.refined_text)}</div>
+          </div>`
+        )
+        .join("");
+    }
+    return `<div class="compare">${stats}${head}${rows}</div>`;
+  }
+
+  // nav：{ prev, next } 前一篇／後一篇手札（沒有就是 null）；compare：是否顯示原文對照
+  function journal(j, msgMap, nav = {}, compare = false) {
+    const body = compare ? compareBody(j, msgMap) : j.style === "memo" ? memoBody(j, msgMap) : articleBody(j, msgMap);
     const navBtn = (x, dir) =>
       x
         ? `<button class="nav-turn" data-dir="${dir}">${dir === "prev" ? `← 前一篇 ${dayLabel(x)}` : `${dayLabel(x)} 後一篇 →`}</button>`
@@ -218,6 +257,7 @@ const Render = (() => {
     return `<div class="reader-top">
         <button class="reader-back" id="btnReaderBack">← 所有手札</button>
         <div class="reader-actions">
+          <button id="btnCompare"${compare ? ' class="on"' : ""}>${compare ? "📔 看手札" : "🔍 對照原文"}</button>
           <button id="btnEditJournal">✏️ 編輯</button>
           <button id="btnDeleteJournal" class="del">🗑️ 刪除</button>
         </div>
@@ -260,20 +300,36 @@ const Render = (() => {
       </div>`;
   }
 
-  // 貼圖面板：內建貼圖＋自己上傳的貼圖＋新增按鈕
-  function stickerPanel(custom = []) {
-    const builtIn = STICKERS.map(
-      (st) => `<button type="button" class="stk" data-key="${st.key}" title="${st.label}"><span class="stk-face">${st.emoji}</span><small>${st.label}</small></button>`
-    ).join("");
-    const mine = custom
-      .map(
-        (c) => `<button type="button" class="stk" data-custom="${c.id}" title="${esc(c.label)}">
-          <span class="stk-face"><img src="${imgURL({ id: `pack_${c.id}`, blob: c.blob })}" alt=""></span><small>${esc(c.label)}</small>
-          <span class="stk-del" data-del="${c.id}" title="從貼圖庫移除">×</span>
-        </button>`
-      )
+  // 貼圖面板：上排分類分頁（最近／各類表情／自己的），下面是貼圖格子，不顯示文字
+  function stickerPanel(custom = [], tab = "recent") {
+    const recent = recentStickers();
+    const tabs = [
+      { key: "recent", icon: "🕘", name: "最近使用" },
+      ...STICKER_GROUPS.map((g) => ({ key: g.key, icon: g.icon, name: g.name })),
+      { key: "mine", icon: "⭐", name: "自己的貼圖" },
+    ]
+      .map((t) => `<button type="button" class="stk-tab${t.key === tab ? " active" : ""}" data-tab="${t.key}" title="${t.name}">${t.icon}</button>`)
       .join("");
-    return `${builtIn}${mine}<label class="stk stk-add" title="上傳自己的貼圖"><span class="stk-face">＋</span><small>自己的貼圖</small><input id="stickerUpload" type="file" accept="image/*" hidden></label>`;
+
+    const emojiBtn = (e) => `<button type="button" class="stk" data-emoji="${e}"><span class="stk-face">${e}</span></button>`;
+    let grid;
+    if (tab === "mine") {
+      grid =
+        custom
+          .map(
+            (c) => `<button type="button" class="stk" data-custom="${c.id}">
+              <span class="stk-face"><img src="${imgURL({ id: `pack_${c.id}`, blob: c.blob })}" alt=""></span>
+              <span class="stk-del" data-del="${c.id}" title="從貼圖庫移除">×</span>
+            </button>`
+          )
+          .join("") +
+        `<label class="stk stk-add" title="上傳自己的貼圖"><span class="stk-face">＋</span><input id="stickerUpload" type="file" accept="image/*" hidden></label>`;
+    } else if (tab === "recent") {
+      grid = recent.length ? recent.map(emojiBtn).join("") : `<p class="stk-empty">還沒有用過的貼圖，從上面的分類挑一個吧</p>`;
+    } else {
+      grid = STICKER_GROUPS.find((g) => g.key === tab).list.map(emojiBtn).join("");
+    }
+    return `<div class="stk-tabs">${tabs}</div><div class="stk-grid">${grid}</div>`;
   }
 
   // 主題選單：每個選項附一條色票

@@ -92,7 +92,7 @@ const Sync = (() => {
       });
     }
     const stickers = j.message_ids.map((id) => msgMap.get(id)).filter((m) => m?.type === "sticker");
-    if (stickers.length) lines.push(`貼圖：${stickers.map((m) => (m.emoji ? `${m.emoji} ${m.label}` : m.label)).join("、")}`, "");
+    if (stickers.length) lines.push(`貼圖：${stickers.map((m) => m.emoji || m.label || "貼圖").join(" ")}`, "");
     return lines.join("\n");
   }
 

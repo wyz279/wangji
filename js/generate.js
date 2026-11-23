@@ -20,7 +20,7 @@ const Gen = (() => {
       .filter((m) => !(withIds && m.type === "sticker"))
       .map((m) => {
         const t = `[${stamp(m.timestamp)}]`;
-        if (m.type === "sticker") return `${t} [貼圖：${m.emoji ? m.emoji + " " : ""}${m.label}]`;
+        if (m.type === "sticker") return `${t} [貼圖：${[m.emoji, m.label].filter(Boolean).join(" ")}]`;
         if (withIds) return `${t} (${m.id}) ${m.type === "image" ? "[圖片]" : m.content}`;
         return m.type === "image" ? `${t} [圖片 ${m.id}]` : `${t} ${m.content}`;
       })

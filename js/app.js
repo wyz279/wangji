@@ -182,8 +182,10 @@ async function sendImages(files) {
 }
 
 /* ---------- 貼圖 ---------- */
+let stickerTab = recentStickers().length ? "recent" : "face";
+
 function drawStickerPanel() {
-  $("#stickerPanel").innerHTML = Render.stickerPanel(customStickers);
+  $("#stickerPanel").innerHTML = Render.stickerPanel(customStickers, stickerTab);
 }
 
 function toggleStickers() {
@@ -193,25 +195,31 @@ function toggleStickers() {
 }
 
 async function sendSticker(st) {
-  await addMessage({ id: newId("stk"), timestamp: localISO(), type: "sticker", journal_id: null, ...st });
+  await addMessage({ id: newId("stk"), timestamp: localISO(), type: "sticker", journal_id: null, label: "", ...st });
   renderChat();
 }
 
 async function onStickerClick(e) {
+  const tab = e.target.closest("[data-tab]");
+  if (tab) {
+    stickerTab = tab.dataset.tab;
+    return drawStickerPanel();
+  }
   const del = e.target.closest("[data-del]");
   if (del) {
     e.stopPropagation();
+    e.preventDefault();
     const c = customStickers.find((x) => x.id === del.dataset.del);
-    if (!c || !confirm(`從貼圖庫移除「${c.label}」？（已經傳出去的不受影響）`)) return;
+    if (!c || !confirm("從貼圖庫移除這張貼圖？（已經傳出去的不受影響）")) return;
     customStickers = customStickers.filter((x) => x.id !== c.id);
     await DB.setMeta("customStickers", customStickers);
     return drawStickerPanel();
   }
   const btn = e.target.closest(".stk");
   if (!btn || btn.classList.contains("stk-add")) return;
-  if (btn.dataset.key) {
-    const st = findSticker(btn.dataset.key);
-    return sendSticker({ emoji: st.emoji, label: st.label });
+  if (btn.dataset.emoji) {
+    pushRecent(btn.dataset.emoji);
+    return sendSticker({ emoji: btn.dataset.emoji });
   }
   const c = customStickers.find((x) => x.id === btn.dataset.custom);
   if (c) sendSticker({ blob: c.blob, label: c.label, custom: true });
@@ -223,7 +231,7 @@ async function onStickerUpload(e) {
   if (!file) return;
   try {
     const blob = await compressSticker(file);
-    const label = (prompt("這張貼圖代表什麼心情或意思？（例如：累爆、好耶）\nAI 整理時會參考這個含意。") || "").trim() || "貼圖";
+    const label = (prompt("這張貼圖代表什麼心情或意思？（例如：累爆、好耶）\n只給 AI 整理時參考，畫面上不會顯示。") || "").trim() || "貼圖";
     customStickers.push({ id: newId("pack"), label: label.slice(0, 12), blob });
     await DB.setMeta("customStickers", customStickers);
     drawStickerPanel();
@@ -296,7 +304,8 @@ async function onGenerate() {
   if (!days[0].some((m) => m.type === "text") && days.length > 1) days.splice(0, 2, [...days[0], ...days[1]]);
 
   // 風格選擇：預設上次用的
-  let style = localStorage.getItem(STYLE_STORAGE) || "daily";
+  let style = localStorage.getItem(STYLE_STORAGE);
+  if (!STYLES[style]) style = "daily";
   const picker = $("#stylePicker");
   const drawPicker = () => (picker.innerHTML = Render.stylePicker(style));
   drawPicker();
@@ -414,15 +423,15 @@ function neighbors(id) {
   return { prev: list[i - 1] || null, next: list[i + 1] || null };
 }
 
-// 打開一篇手札
-function showJournal(id) {
+// 打開一篇手札。compare：是否顯示原文對照
+function showJournal(id, compare = false) {
   const j = journals.find((x) => x.id === id);
   if (!j) return;
   const reader = $("#journalReader");
   showView("journal");
   currentJournalId = id;
   const msgMap = new Map(messages.map((m) => [m.id, m]));
-  reader.innerHTML = Render.journal(j, msgMap, neighbors(id));
+  reader.innerHTML = Render.journal(j, msgMap, neighbors(id), compare);
   reader.hidden = false;
   reader.scrollTop = 0;
   $("#journalList").hidden = true;
@@ -434,6 +443,11 @@ function showJournal(id) {
   $("#readerNav").onclick = (e) => {
     const btn = e.target.closest(".nav-turn");
     if (btn) turnTo(btn.dataset.dir);
+  };
+  $("#btnCompare").onclick = () => {
+    const top = reader.scrollTop;
+    showJournal(j.id, !compare);
+    reader.scrollTop = top;
   };
   $("#btnEditJournal").onclick = () => editJournal(j);
   $("#btnDeleteJournal").onclick = () => deleteJournal(j);
@@ -722,10 +736,30 @@ async function init() {
   await Sync.init().catch((e) => console.warn("[忘紀] 資料夾連結讀取失敗：", e));
   const st = Sync.status();
   if (st.linked && !st.active) toast("本機資料夾需要重新授權，到 ⚙️ 設定按「重新授權」");
-  // M1 產生的舊手札沒有 versions，補上
+  // 整理舊手札：M1 的沒有 versions 要補上；已經拿掉的風格（例如毒舌、寫給未來）把那個版本移除
+  const fixed = [];
   journals.forEach((j) => {
-    if (!j.versions) j.versions = { [j.style]: j.result };
+    let changed = false;
+    if (!j.versions) {
+      j.versions = { [j.style]: j.result };
+      changed = true;
+    }
+    Object.keys(j.versions).forEach((k) => {
+      if (!STYLES[k]) {
+        delete j.versions[k];
+        changed = true;
+      }
+    });
+    if (!STYLES[j.style]) {
+      const keep = Object.keys(j.versions)[0];
+      j.style = keep || "daily";
+      if (keep) j.result = j.versions[keep];
+      else j.versions = { daily: j.result }; // 只剩被拿掉的風格：內容保留，標成順稿
+      changed = true;
+    }
+    if (changed) fixed.push(j);
   });
+  if (fixed.length) await DB.putMany("journals", fixed);
 
   // 上次整理到一半就關掉頁面 → 解除鎖定，讓它們回到未整理
   const stuck = messages.filter((m) => m.journal_id === "processing");
