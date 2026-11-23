@@ -42,7 +42,10 @@ const MEMO_SECTIONS = ["發生的事", "心情", "待辦／想買"];
 
 const COMMON_RULES = `- 絕對不可新增使用者沒寫過的事件、感想或細節，也不要猜測照片內容。
 - 一律使用繁體中文（包含標題），不可出現簡體字或英文。
-- title 是整篇手札的一句話總結，要帶有使用者的口吻，可以俏皮，不超過 20 個字。`;
+- title 是整篇手札的一句話總結，要帶有使用者的口吻，可以俏皮，不超過 20 個字。
+- mood 是這一整天的心情（不受文字風格影響）：emoji 一個；label 兩到四個字，例如「崩潰」「還行」「超爽」；score 是 1～5 的整數（1 很糟、2 不太好、3 普通、4 不錯、5 超好）。依使用者實際表達的情緒判斷，不要自己腦補。`;
+
+const MOOD_JSON = `"mood": {"emoji": "😵", "label": "累爆", "score": 2}`;
 
 const PROSE_RULES = `- 整篇是「一篇連貫的日記」，sections 是文章的段落，依時間先後排列，共 1～6 段。
 - 時間相近、講同一件事的紀錄放同一段；段落之間要自然銜接，不要每段像獨立的小文章，也不要下小標。`;
@@ -62,7 +65,7 @@ ${PROSE_RULES}
 
 【輸出格式】
 只輸出 JSON，不要任何其他文字：
-{"title": "...", "sections": [{"time_range": "HH:mm-HH:mm", "message_ids": ["msg_...", "img_..."]}]}`;
+{"title": "...", ${MOOD_JSON}, "sections": [{"time_range": "HH:mm-HH:mm", "message_ids": ["msg_...", "img_..."]}]}`;
   }
 
   if (styleKey === "memo") {
@@ -84,7 +87,7 @@ ${COMMON_RULES}
 
 【輸出格式】
 只輸出 JSON，不要任何其他文字：
-{"title": "...", "sections": [{"section_title": "發生的事", "refined_text": "- ...\\n- ..."}]}`;
+{"title": "...", ${MOOD_JSON}, "sections": [{"section_title": "發生的事", "refined_text": "- ...\\n- ..."}]}`;
   }
 
   const style = STYLES[styleKey];
@@ -106,5 +109,5 @@ ${PROSE_RULES}
 
 【輸出格式】
 只輸出 JSON，不要任何其他文字：
-{"title": "...", "sections": [{"time_range": "HH:mm-HH:mm", "refined_text": "...", "matched_images": ["img_..."]}]}`;
+{"title": "...", ${MOOD_JSON}, "sections": [{"time_range": "HH:mm-HH:mm", "refined_text": "...", "matched_images": ["img_..."]}]}`;
 }

@@ -138,6 +138,36 @@ const Gen = (() => {
     });
   }
 
+  // 心情格式不對就當作沒有（不為了心情浪費重試次數）
+  function validMood(m) {
+    if (!m || typeof m !== "object") return null;
+    const score = Math.round(Number(m.score));
+    if (!(score >= 1 && score <= 5) || !isText(m.label)) return null;
+    return { emoji: isText(m.emoji) ? [...m.emoji.trim()].slice(0, 4).join("") : "📔", label: m.label.trim().slice(0, 6), score };
+  }
+
+  // 舊手札補心情：只問心情，不重寫內容
+  async function generateMood(msgs, key) {
+    const conversation = [
+      {
+        role: "system",
+        content: `你會讀到一個人一整天隨手記下的碎碎念，每行是 [月/日 時:分] 內容。請判斷他這一天的整體心情，只輸出 JSON：
+{"emoji": "一個 emoji", "label": "兩到四個字的繁體中文，例如：崩潰、還行、超爽", "score": 1～5 的整數（1 很糟、2 不太好、3 普通、4 不錯、5 超好）}
+依他實際表達的情緒判斷，不要腦補。`,
+      },
+      { role: "user", content: formatTimeline(msgs, false, true) },
+    ];
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const mood = validMood(parseJSON(await callGroq(key, conversation)));
+        if (mood) return mood;
+      } catch (e) {
+        if (/API Key|額度|連不上/.test(e.message)) throw e;
+      }
+    }
+    return null;
+  }
+
   async function callGroq(key, messages) {
     let res;
     try {
@@ -220,5 +250,5 @@ const Gen = (() => {
     throw new Error(`AI 連續 ${MAX_TRIES} 次輸出不合格（${lastErrors[0]}）`);
   }
 
-  return { generateJournal, testKey, formatTimeline, validate, placeMissing, convertRaw };
+  return { generateJournal, generateMood, validMood, testKey, formatTimeline, validate, placeMissing, convertRaw };
 })();

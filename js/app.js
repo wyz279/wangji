@@ -362,6 +362,7 @@ async function runGeneration(batches, key, style) {
         message_ids: target.map((m) => m.id),
         result,
         versions: { [style]: result }, // 各風格的結果都存著，切換時不用重新生成
+        mood: Gen.validMood(result.mood), // 整天的心情（月曆和心情統計用）
       };
       await DB.put("journals", journal);
       journals.push(journal);
@@ -407,12 +408,130 @@ function showView(name) {
   if (name === "chat") renderChat();
 }
 
+// 手札本首頁的狀態：分頁、正在看的月份、月曆上點選的日期、搜尋字
+const home = { tab: "calendar", y: new Date().getFullYear(), m: new Date().getMonth(), picked: null, query: "" };
+
 function showJournalList() {
   showView("journal");
-  const sorted = [...journals].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
-  $("#journalList").innerHTML = Render.journalList(sorted);
+  renderHome();
   $("#journalList").hidden = false;
   $("#journalReader").hidden = true;
+}
+
+function renderHome() {
+  const msgMap = new Map(messages.map((m) => [m.id, m]));
+  const panel =
+    home.tab === "calendar"
+      ? Render.calendar(journals, home.y, home.m, home.picked)
+      : home.tab === "list"
+        ? Render.searchPanel(journals, msgMap, home.query)
+        : Render.moodView(journals, home.y, home.m);
+  $("#journalList").innerHTML = Render.homeTabs(home.tab) + `<div class="home-panel">${panel}</div>`;
+}
+
+function onHomeClick(e) {
+  const tab = e.target.closest("[data-tab]");
+  if (tab) {
+    home.tab = tab.dataset.tab;
+    return renderHome();
+  }
+  const mon = e.target.closest("[data-month]");
+  if (mon) {
+    const d = new Date(home.y, home.m + Number(mon.dataset.month), 1);
+    home.y = d.getFullYear();
+    home.m = d.getMonth();
+    home.picked = null;
+    return renderHome();
+  }
+  const day = e.target.closest("[data-day]");
+  if (day) {
+    const list = journals.filter((j) => Render.journalDay(j) === day.dataset.day);
+    if (list.length === 1) return showJournal(list[0].id);
+    home.picked = day.dataset.day;
+    return renderHome();
+  }
+  if (e.target.closest("#btnFillMood")) return fillMoods();
+  const card = e.target.closest(".journal-card");
+  if (card) showJournal(card.dataset.id);
+}
+
+// 舊手札補心情：一篇一篇問 AI
+async function fillMoods() {
+  const key = localStorage.getItem(KEY_STORAGE);
+  if (!key) return toast("先到設定貼上 Groq API Key 喔");
+  const prefix = `${home.y}-${String(home.m + 1).padStart(2, "0")}`;
+  const todo = journals.filter((j) => !j.mood && Render.journalDay(j).startsWith(prefix));
+  const btn = $("#btnFillMood");
+  const msgMap = new Map(messages.map((m) => [m.id, m]));
+  let done = 0;
+  for (const j of todo) {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = `補心情中…（${done + 1}/${todo.length}）`;
+    }
+    try {
+      const msgs = j.message_ids.map((id) => msgMap.get(id)).filter(Boolean).sort(byTime);
+      const mood = await Gen.generateMood(msgs, key);
+      if (mood) {
+        j.mood = mood;
+        await DB.put("journals", j);
+        Sync.journal(j, messages);
+        done++;
+      }
+    } catch (e) {
+      toast(`補心情失敗：${e.message}`);
+      break;
+    }
+  }
+  if (home.tab === "mood" && !$("#journalList").hidden) renderHome();
+  toast(`已補上 ${done} 篇的心情`);
+}
+
+/* ---------- 匯出圖片 ---------- */
+// 需要時才從網路載入 html2canvas（把網頁畫成圖片的工具）
+function loadHtml2canvas() {
+  if (window.html2canvas) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
+    sc.onload = resolve;
+    sc.onerror = () => reject(new Error("載入匯出工具失敗，請確認有網路"));
+    document.head.appendChild(sc);
+  });
+}
+
+async function exportImage(j) {
+  const btn = $("#btnExport");
+  btn.disabled = true;
+  btn.textContent = "⏳ 匯出中…";
+  const holder = document.createElement("div");
+  holder.className = "export-holder";
+  try {
+    await loadHtml2canvas();
+    holder.innerHTML = Render.journalExport(j, new Map(messages.map((m) => [m.id, m])));
+    document.body.appendChild(holder);
+    const page = holder.firstElementChild;
+    await Promise.all([...page.querySelectorAll("img")].map((img) => (img.complete ? null : new Promise((r) => (img.onload = img.onerror = r)))));
+    const canvas = await window.html2canvas(page, {
+      scale: 2,
+      backgroundColor: getComputedStyle(document.body).getPropertyValue("--bg").trim() || "#ffffff",
+      useCORS: true,
+    });
+    const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `忘紀_${Render.journalDay(j)}.png`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast("已匯出圖片，請看瀏覽器的下載");
+  } catch (e) {
+    console.error("[忘紀] 匯出失敗：", e);
+    toast(`匯出失敗：${e.message}`);
+  } finally {
+    holder.remove();
+    btn.disabled = false;
+    btn.textContent = "🖼️ 匯出圖片";
+  }
 }
 
 // 依日期由舊到新排的手札，用來找前一篇／後一篇
@@ -449,6 +568,7 @@ function showJournal(id, compare = false) {
     showJournal(j.id, !compare);
     reader.scrollTop = top;
   };
+  $("#btnExport").onclick = () => exportImage(j);
   $("#btnEditJournal").onclick = () => editJournal(j);
   $("#btnDeleteJournal").onclick = () => deleteJournal(j);
 }
@@ -516,6 +636,7 @@ async function switchStyle(j, style) {
   try {
     const { result } = await Gen.generateJournal(msgs, style, key);
     j.versions[style] = result;
+    if (!j.mood) j.mood = Gen.validMood(result.mood);
     j.style = style;
     j.result = result;
     await DB.put("journals", j);
@@ -715,9 +836,12 @@ function bind() {
     if (e.key === "ArrowLeft") turnTo("prev");
     if (e.key === "ArrowRight") turnTo("next");
   });
-  $("#journalList").addEventListener("click", (e) => {
-    const card = e.target.closest(".journal-card");
-    if (card) showJournal(card.dataset.id);
+  $("#journalList").addEventListener("click", onHomeClick);
+  // 搜尋：只重畫結果，輸入框不會失去焦點
+  $("#journalList").addEventListener("input", (e) => {
+    if (e.target.id !== "searchInput") return;
+    home.query = e.target.value;
+    $("#searchResults").innerHTML = Render.searchResults(journals, new Map(messages.map((m) => [m.id, m])), home.query);
   });
 }
 
