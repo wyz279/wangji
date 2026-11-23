@@ -1,0 +1,92 @@
+/* 畫面主題：只定義 CSS 變數，用 data-theme 切換。
+   選擇器不限定 body，主題選單裡的色票小方塊也能套用同一組變數。 */
+
+/* 牛皮紙復古風 */
+[data-theme="kraft"] {
+  --bg: #efe4cf;
+  --paper: #f9f2e4;
+  --ink: #3b2f24;
+  --muted: #8a7a66;
+  --accent: #a0522d;
+  --accent-ink: #fff8ee;
+  --bubble: #fffaf0;
+  --bubble-border: #dccbaa;
+  --line: #d8c7a6;
+  --photo-frame: #ffffff;
+  --font-journal: "Noto Serif TC", "PMingLiU", "Songti TC", serif;
+}
+
+/* 深夜黑金 */
+[data-theme="noir"] {
+  --bg: #13110e;
+  --paper: #1e1b16;
+  --ink: #ece0c4;
+  --muted: #9a8c6e;
+  --accent: #c9a227;
+  --accent-ink: #13110e;
+  --bubble: #29251e;
+  --bubble-border: #4a4130;
+  --line: #3a3326;
+  --photo-frame: #3a3326;
+  --font-journal: "Noto Serif TC", "PMingLiU", "Songti TC", serif;
+}
+
+/* 簡約日系北歐 */
+[data-theme="nordic"] {
+  --bg: #f3f3ef;
+  --paper: #ffffff;
+  --ink: #2f3437;
+  --muted: #8c9196;
+  --accent: #6f8f7f;
+  --accent-ink: #ffffff;
+  --bubble: #ffffff;
+  --bubble-border: #e0e0da;
+  --line: #e4e4de;
+  --photo-frame: #ffffff;
+  --font-journal: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+}
+
+/* 櫻花手帳 */
+[data-theme="sakura"] {
+  --bg: #f8e8ec;
+  --paper: #fff7f9;
+  --ink: #5a3d46;
+  --muted: #a5858f;
+  --accent: #d4849a;
+  --accent-ink: #ffffff;
+  --bubble: #ffffff;
+  --bubble-border: #f0cdd6;
+  --line: #efd2d9;
+  --photo-frame: #ffffff;
+  --font-journal: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+}
+
+/* 墨綠書房 */
+[data-theme="forest"] {
+  --bg: #1d2822;
+  --paper: #25322b;
+  --ink: #e3e7da;
+  --muted: #92a294;
+  --accent: #c8b27a;
+  --accent-ink: #1d2822;
+  --bubble: #2d3c34;
+  --bubble-border: #3f5147;
+  --line: #3a4a41;
+  --photo-frame: #e3e7da;
+  --font-journal: "Noto Serif TC", "PMingLiU", "Songti TC", serif;
+}
+
+/* 海鹽藍 */
+[data-theme="ocean"] {
+  --bg: #e4eff3;
+  --paper: #f7fbfc;
+  --ink: #23404c;
+  --muted: #7b97a2;
+  --accent: #3d8cab;
+  --accent-ink: #ffffff;
+  --bubble: #ffffff;
+  --bubble-border: #cde0e7;
+  --line: #d2e2e8;
+  --photo-frame: #ffffff;
+  --font-journal: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+}

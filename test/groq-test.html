@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>忘紀｜Groq 瀏覽器直連測試</title>
+<style>
+  body { font-family: system-ui, "Noto Sans TC", sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; line-height: 1.6; color: #333; }
+  h1 { font-size: 1.4rem; }
+  label { display: block; margin-top: 16px; font-weight: 600; }
+  input, select, textarea { width: 100%; padding: 8px; font-size: 1rem; box-sizing: border-box; margin-top: 4px; }
+  button { margin-top: 16px; margin-right: 8px; padding: 8px 16px; font-size: 1rem; cursor: pointer; }
+  pre { background: #f5f2ec; padding: 12px; white-space: pre-wrap; word-break: break-all; border-radius: 6px; min-height: 60px; }
+  .ok { color: #2e7d32; font-weight: 600; }
+  .fail { color: #c62828; font-weight: 600; }
+  .hint { font-size: 0.9rem; color: #777; }
+</style>
+</head>
+<body>
+<h1>忘紀｜Groq 瀏覽器直連測試</h1>
+<p class="hint">目的：確認瀏覽器能不能直接呼叫 Groq API（不被 CORS 擋）。Key 只存在這個頁面的記憶體裡，重新整理就消失，不會上傳到任何地方。</p>
+
+<label>Groq API Key
+  <input id="key" type="text" placeholder="gsk_..." autocomplete="off" spellcheck="false" data-lpignore="true" style="-webkit-text-security: disc;">
+</label>
+
+<button id="btnModels">步驟 1：讀取可用模型清單</button>
+<label>模型（步驟 1 成功後會自動填入選項）
+  <select id="model"><option value="">（請先執行步驟 1）</option></select>
+</label>
+
+<label>測試訊息（模擬一天的隨手紀錄）
+  <textarea id="input" rows="5">[09:12] 早八又遲到 公車直接跑掉 傻眼
+[09:15] [圖片 img_001]
+[12:40] 午餐吃到超好吃的咖哩 必須記下來
+[23:30] 報告還沒寫完 明天再說吧 反正明天世界末日也沒關係</textarea>
+</label>
+
+<button id="btnChat">步驟 2：送出測試，要求回傳 JSON</button>
+
+<p id="status"></p>
+<pre id="out"></pre>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const BASE = "https://api.groq.com/openai/v1";
+
+function show(ok, msg, data) {
+  $("status").className = ok ? "ok" : "fail";
+  $("status").textContent = msg;
+  $("out").textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+}
+
+async function call(path, options = {}) {
+  const key = $("key").value.trim();
+  if (!key) throw new Error("請先貼上 API Key");
+  const res = await fetch(BASE + path, {
+    ...options,
+    headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`HTTP ${res.status}：${JSON.stringify(body)}`);
+  return body;
+}
+
+$("btnModels").onclick = async () => {
+  try {
+    const data = await call("/models");
+    const ids = data.data.map(m => m.id).sort();
+    $("model").innerHTML = ids.map(id => `<option>${id}</option>`).join("");
+    show(true, `✅ 連線成功，瀏覽器可以直接呼叫 Groq（共 ${ids.length} 個模型）`, ids);
+  } catch (e) {
+    const cors = e instanceof TypeError;
+    show(false, cors ? "❌ 請求被擋（很可能是 CORS），純前端方案不可行" : "❌ 有回應但出錯（Key 錯誤或其他問題）", String(e));
+  }
+};
+
+$("btnChat").onclick = async () => {
+  const model = $("model").value;
+  if (!model) return show(false, "請先執行步驟 1 選擇模型", "");
+  show(true, "⏳ 生成中…", "");
+  try {
+    const data = await call("/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({
+        model,
+        temperature: 0.7,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: "你是日記整理助手。把使用者的隨手紀錄整理成 JSON：{\"title\": string, \"sections\": [{\"section_title\": string, \"refined_text\": string, \"matched_images\": string[]}]}。保留使用者口吻，不要寫成官方文章。只輸出 JSON。" },
+          { role: "user", content: $("input").value },
+        ],
+      }),
+    });
+    const text = data.choices[0].message.content;
+    try {
+      show(true, "✅ 生成成功，且回傳內容可以解析成 JSON", JSON.parse(text));
+    } catch {
+      show(false, "⚠️ 生成成功，但回傳內容不是合法 JSON（之後靠驗證＋重試處理）", text);
+    }
+  } catch (e) {
+    show(false, "❌ 生成失敗", String(e));
+  }
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>忘紀｜隨手忘記也沒關係</title>
+<link rel="stylesheet" href="css/themes.css">
+<link rel="stylesheet" href="css/base.css">
+</head>
+<body data-theme="kraft">
+
+<header class="topbar">
+  <h1 class="logo">忘紀</h1>
+  <nav>
+    <button id="btnToChat" class="nav-btn" hidden>← 回聊天室</button>
+    <button id="btnToJournals" class="nav-btn">📔 手札本</button>
+    <button id="btnTheme" class="nav-btn" aria-label="切換畫面主題">🎨</button>
+    <button id="btnSettings" class="nav-btn" aria-label="設定">⚙️</button>
+  </nav>
+</header>
+
+<!-- 聊天室畫面 -->
+<main id="chatView" class="view">
+  <div id="chatList" class="chat-list"></div>
+
+  <div class="composer-wrap">
+    <button id="btnGenerate" class="generate-btn">✨ 一鍵整理</button>
+    <form id="composer" class="composer">
+      <label class="icon-btn" title="上傳照片">
+        📷
+        <input id="imageInput" type="file" accept="image/*" multiple hidden>
+      </label>
+      <textarea id="textInput" rows="1" placeholder="想到什麼就丟進來…"></textarea>
+      <button type="submit" class="send-btn">送出</button>
+    </form>
+  </div>
+</main>
+
+<!-- 手札本畫面 -->
+<main id="journalView" class="view" hidden>
+  <div id="journalList" class="journal-list"></div>
+  <article id="journalReader" class="journal-reader" hidden></article>
+</main>
+
+<!-- 整理確認框 -->
+<dialog id="confirmDlg">
+  <p id="confirmText"></p>
+  <p class="hint">文字風格（之後在手札頁也能切換）</p>
+  <div id="stylePicker" class="style-picker"></div>
+  <div class="dlg-actions">
+    <button value="cancel" class="ghost">取消</button>
+    <button value="all" id="btnConfirmAll" class="ghost">全部合成一篇</button>
+    <button value="batch" id="btnConfirmBatch" class="primary">開始整理</button>
+  </div>
+</dialog>
+
+<!-- 設定框 -->
+<dialog id="settingsDlg">
+  <h2>設定</h2>
+  <!-- 刻意用 type="text" + CSS 遮罩，避免 Chrome 把 Key 當成密碼儲存、之後自動填入舊 Key -->
+  <label>Groq API Key
+    <input id="keyInput" type="text" class="secret" name="wangji-groq-key" placeholder="gsk_..."
+           autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore>
+  </label>
+  <p id="keyStatus" class="hint"></p>
+  <p class="hint">Key 只存在你這台裝置的瀏覽器裡，不會上傳到 GitHub 或任何地方。</p>
+  <div id="folderSync" class="dev-tools">
+    <p class="hint">本機資料夾（自動把原始紀錄存到 raw/、整理後的手札存到 journals/）</p>
+    <p id="folderStatus" class="hint"></p>
+    <button type="button" id="btnLinkFolder" class="ghost">連結資料夾</button>
+    <button type="button" id="btnResync" class="ghost">重新同步全部</button>
+  </div>
+  <div class="dev-tools">
+    <p class="hint">測試工具</p>
+    <button type="button" id="btnSample" class="ghost">載入測試資料（3 天份）</button>
+    <button type="button" id="btnClearAll" class="ghost danger">清除所有紀錄與手札</button>
+  </div>
+  <div class="dlg-actions">
+    <button type="button" id="btnTestKey" class="ghost">測試連線</button>
+    <button value="cancel" class="ghost">取消</button>
+    <button value="save" class="primary">儲存</button>
+  </div>
+</dialog>
+
+<!-- 主題選單 -->
+<dialog id="themeDlg">
+  <h2>畫面主題</h2>
+  <div id="themeGrid" class="theme-grid"></div>
+  <div class="dlg-actions">
+    <button value="close" class="primary">完成</button>
+  </div>
+</dialog>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="js/db.js"></script>
+<script src="js/prompts.js"></script>
+<script src="js/generate.js"></script>
+<script src="js/render.js"></script>
+<script src="js/sample.js"></script>
+<script src="js/sync.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
