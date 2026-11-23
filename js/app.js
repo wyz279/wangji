@@ -20,6 +20,8 @@ let generating = false;
 let genLabel = ""; // 整理中按鈕上的進度文字
 let rewriting = false;
 let currentJournalId = null; // 目前正在閱讀的手札
+const chatUI = { selectedId: null, editingId: null };
+let customStickers = []; // 自己上傳的貼圖庫 [{ id, label, blob }] // 聊天室裡選取／編輯中的訊息
 
 /* ---------- 小工具 ---------- */
 function localISO(d = new Date()) {
@@ -79,12 +81,69 @@ function compressImage(file, maxSide = 1280, quality = 0.85) {
 /* ---------- 聊天室 ---------- */
 const pending = () => messages.filter((m) => m.journal_id === null);
 
-function renderChat() {
+// keepScroll：選取或編輯訊息時不要跳到最底下
+function renderChat(keepScroll = false) {
   const visible = messages.filter((m) => m.journal_id === null || m.journal_id === "processing").sort(byTime);
+  // 選取的訊息如果已經被拿去整理，就取消選取
+  if (!visible.some((m) => m.id === chatUI.selectedId && m.journal_id === null)) chatUI.selectedId = chatUI.editingId = null;
   const list = $("#chatList");
-  list.innerHTML = Render.chat(visible, journals);
-  list.scrollTop = list.scrollHeight;
+  const top = list.scrollTop;
+  const draft = $("#editInput")?.value; // 編輯到一半時畫面重畫（例如背景整理完成），保留已經打的字
+  list.innerHTML = Render.chat(visible, journals, chatUI);
+  list.scrollTop = keepScroll ? top : list.scrollHeight;
   updateGenerateBtn();
+  const edit = $("#editInput");
+  if (edit) {
+    if (draft != null) edit.value = draft;
+    edit.focus();
+    edit.setSelectionRange(edit.value.length, edit.value.length);
+  }
+}
+
+/* ---------- 修改／刪除訊息（只限還沒整理的） ---------- */
+async function saveEdit() {
+  const m = messages.find((x) => x.id === chatUI.editingId);
+  const text = $("#editInput")?.value.trim();
+  if (!m || m.journal_id !== null) return;
+  if (!text) return toast("內容不能是空的，不要的話可以按刪除");
+  if (text !== m.content) {
+    m.content = text;
+    m.edited = true;
+    await DB.put("messages", m);
+    Sync.message(m, messages);
+  }
+  chatUI.selectedId = chatUI.editingId = null;
+  renderChat(true);
+}
+
+async function deleteMessage(id) {
+  const m = messages.find((x) => x.id === id);
+  if (!m || m.journal_id !== null) return;
+  if (!confirm(m.type === "image" ? "確定要刪除這張照片嗎？" : m.type === "sticker" ? "確定要刪除這張貼圖嗎？" : "確定要刪除這則訊息嗎？")) return;
+  await DB.remove("messages", id);
+  messages = messages.filter((x) => x.id !== id);
+  Sync.removed(m, messages);
+  chatUI.selectedId = chatUI.editingId = null;
+  renderChat(true);
+}
+
+function onChatClick(e) {
+  const card = e.target.closest(".chat-journal");
+  if (card) return showJournal(card.dataset.id);
+
+  const act = e.target.closest("[data-act]")?.dataset.act;
+  if (act === "edit") chatUI.editingId = chatUI.selectedId;
+  else if (act === "delete") return deleteMessage(chatUI.selectedId);
+  else if (act === "save") return saveEdit();
+  else if (act === "cancel") chatUI.editingId = null;
+  else if (e.target.closest(".edit-box")) return; // 在編輯框裡點來點去不用處理
+  else {
+    // 點訊息 → 選取（再點一次取消）；點空白處 → 取消選取
+    const msg = e.target.closest(".msg.selectable");
+    chatUI.editingId = null;
+    chatUI.selectedId = msg && msg.dataset.id !== chatUI.selectedId ? msg.dataset.id : null;
+  }
+  renderChat(true);
 }
 
 function updateGenerateBtn(text) {
@@ -119,6 +178,57 @@ async function sendImages(files) {
     } catch (e) {
       toast(e.message);
     }
+  }
+}
+
+/* ---------- 貼圖 ---------- */
+function drawStickerPanel() {
+  $("#stickerPanel").innerHTML = Render.stickerPanel(customStickers);
+}
+
+function toggleStickers() {
+  const panel = $("#stickerPanel");
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) drawStickerPanel();
+}
+
+async function sendSticker(st) {
+  await addMessage({ id: newId("stk"), timestamp: localISO(), type: "sticker", journal_id: null, ...st });
+  renderChat();
+}
+
+async function onStickerClick(e) {
+  const del = e.target.closest("[data-del]");
+  if (del) {
+    e.stopPropagation();
+    const c = customStickers.find((x) => x.id === del.dataset.del);
+    if (!c || !confirm(`從貼圖庫移除「${c.label}」？（已經傳出去的不受影響）`)) return;
+    customStickers = customStickers.filter((x) => x.id !== c.id);
+    await DB.setMeta("customStickers", customStickers);
+    return drawStickerPanel();
+  }
+  const btn = e.target.closest(".stk");
+  if (!btn || btn.classList.contains("stk-add")) return;
+  if (btn.dataset.key) {
+    const st = findSticker(btn.dataset.key);
+    return sendSticker({ emoji: st.emoji, label: st.label });
+  }
+  const c = customStickers.find((x) => x.id === btn.dataset.custom);
+  if (c) sendSticker({ blob: c.blob, label: c.label, custom: true });
+}
+
+async function onStickerUpload(e) {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    const blob = await compressSticker(file);
+    const label = (prompt("這張貼圖代表什麼心情或意思？（例如：累爆、好耶）\nAI 整理時會參考這個含意。") || "").trim() || "貼圖";
+    customStickers.push({ id: newId("pack"), label: label.slice(0, 12), blob });
+    await DB.setMeta("customStickers", customStickers);
+    drawStickerPanel();
+  } catch (err) {
+    toast(err.message);
   }
 }
 
@@ -296,14 +406,23 @@ function showJournalList() {
   $("#journalReader").hidden = true;
 }
 
+// 依日期由舊到新排的手札，用來找前一篇／後一篇
+const journalOrder = () => [...journals].sort((a, b) => Date.parse(a.range[0]) - Date.parse(b.range[0]));
+function neighbors(id) {
+  const list = journalOrder();
+  const i = list.findIndex((x) => x.id === id);
+  return { prev: list[i - 1] || null, next: list[i + 1] || null };
+}
+
+// 打開一篇手札
 function showJournal(id) {
   const j = journals.find((x) => x.id === id);
   if (!j) return;
+  const reader = $("#journalReader");
   showView("journal");
   currentJournalId = id;
   const msgMap = new Map(messages.map((m) => [m.id, m]));
-  const reader = $("#journalReader");
-  reader.innerHTML = Render.journal(j, msgMap);
+  reader.innerHTML = Render.journal(j, msgMap, neighbors(id));
   reader.hidden = false;
   reader.scrollTop = 0;
   $("#journalList").hidden = true;
@@ -312,6 +431,54 @@ function showJournal(id) {
     const chip = e.target.closest(".style-chip");
     if (chip && chip.dataset.style !== j.style) switchStyle(j, chip.dataset.style);
   };
+  $("#readerNav").onclick = (e) => {
+    const btn = e.target.closest(".nav-turn");
+    if (btn) turnTo(btn.dataset.dir);
+  };
+  $("#btnEditJournal").onclick = () => editJournal(j);
+  $("#btnDeleteJournal").onclick = () => deleteJournal(j);
+}
+
+/* ---------- 手札編輯／刪除 ---------- */
+function editJournal(j) {
+  if (rewriting) return toast("正在重寫風格，等一下再編輯");
+  const reader = $("#journalReader");
+  reader.innerHTML = Render.journalEditor(j);
+  reader.scrollTop = 0;
+  $("#btnEditCancel").onclick = () => showJournal(j.id);
+  $("#btnEditSave").onclick = async () => {
+    const title = $("#editTitle").value.trim();
+    const texts = [...reader.querySelectorAll(".edit-section")].map((t) => t.value.trim());
+    if (!title) return toast("總結不能是空的");
+    if (texts.some((t) => !t)) return toast("有段落是空的，不要的內容請刪掉文字但至少留一句");
+    j.result.title = title;
+    texts.forEach((t, i) => (j.result.sections[i].refined_text = t));
+    j.result.edited = true;
+    j.versions[j.style] = j.result;
+    await DB.put("journals", j);
+    Sync.journal(j, messages);
+    showJournal(j.id);
+    toast("已儲存修改");
+  };
+}
+
+async function deleteJournal(j) {
+  if (!confirm(`確定要刪除 ${Render.dayLabel(j)} 這篇手札嗎？\n\n原本的紀錄會回到聊天室，可以修改後重新整理。`)) return;
+  const back = messages.filter((m) => m.journal_id === j.id);
+  back.forEach((m) => (m.journal_id = null));
+  await DB.putMany("messages", back);
+  await DB.remove("journals", j.id);
+  journals = journals.filter((x) => x.id !== j.id);
+  Sync.journalRemoved(j);
+  showJournalList();
+  toast(`已刪除手札，${back.length} 則紀錄回到聊天室`);
+}
+
+function turnTo(dir) {
+  if (!currentJournalId) return;
+  const target = neighbors(currentJournalId)[dir];
+  if (target) showJournal(target.id);
+  else toast(dir === "prev" ? "這是最早的一篇了" : "這是最新的一篇了");
 }
 
 // 手札換風格：生成過的直接切換，沒生成過的用同一批訊息重寫
@@ -368,6 +535,16 @@ function openThemePicker() {
     }
   };
   ask($("#themeDlg"));
+}
+
+/* ---------- 聊天室背景 ---------- */
+let bgURL = null;
+function applyChatBg(blob) {
+  const list = $("#chatList");
+  if (bgURL) URL.revokeObjectURL(bgURL);
+  bgURL = blob ? URL.createObjectURL(blob) : null;
+  list.style.backgroundImage = bgURL ? `url("${bgURL}")` : "";
+  list.classList.toggle("has-bg", !!blob);
 }
 
 /* ---------- 設定 ---------- */
@@ -431,6 +608,25 @@ async function openSettings() {
     toast(ok ? "已重新同步所有檔案" : "有些檔案寫入失敗，請再試一次");
   };
 
+  $("#bgInput").onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const blob = await compressImage(file, 1920, 0.85);
+      await DB.setMeta("chatBg", blob);
+      applyChatBg(blob);
+      toast("已換上新的聊天室背景");
+    } catch (err) {
+      toast(err.message);
+    }
+  };
+  $("#btnBgRemove").onclick = async () => {
+    await DB.setMeta("chatBg", null);
+    applyChatBg(null);
+    toast("已移除聊天室背景");
+  };
+
   $("#btnSample").onclick = async () => {
     if (messages.some((m) => m.sample)) return (status.textContent = "測試資料已經載入過了，要重來請先清除所有紀錄");
     const sample = await buildSampleMessages();
@@ -479,13 +675,31 @@ function bind() {
     e.target.value = "";
   });
   $("#btnGenerate").addEventListener("click", onGenerate);
+  $("#btnStickers").addEventListener("click", toggleStickers);
+  $("#stickerPanel").addEventListener("click", onStickerClick);
+  $("#stickerPanel").addEventListener("change", (e) => {
+    if (e.target.id === "stickerUpload") onStickerUpload(e);
+  });
   $("#btnToJournals").addEventListener("click", showJournalList);
   $("#btnToChat").addEventListener("click", () => showView("chat"));
   $("#btnSettings").addEventListener("click", openSettings);
   $("#btnTheme").addEventListener("click", openThemePicker);
-  $("#chatList").addEventListener("click", (e) => {
-    const card = e.target.closest(".chat-journal");
-    if (card) showJournal(card.dataset.id);
+  $("#chatList").addEventListener("click", onChatClick);
+  $("#chatList").addEventListener("keydown", (e) => {
+    if (e.target.id !== "editInput") return;
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      saveEdit();
+    } else if (e.key === "Escape") {
+      chatUI.editingId = null;
+      renderChat(true);
+    }
+  });
+  // 手札閱讀頁：鍵盤左右鍵翻頁
+  document.addEventListener("keydown", (e) => {
+    if (!currentJournalId || document.querySelector("dialog[open]") || /INPUT|TEXTAREA/.test(e.target.tagName)) return;
+    if (e.key === "ArrowLeft") turnTo("prev");
+    if (e.key === "ArrowRight") turnTo("next");
   });
   $("#journalList").addEventListener("click", (e) => {
     const card = e.target.closest(".journal-card");
@@ -503,6 +717,8 @@ async function init() {
   } catch {
     toast("瀏覽器資料庫無法使用，請改用 Live Server 開啟");
   }
+  customStickers = (await DB.getMeta("customStickers").catch(() => null)) || [];
+  applyChatBg((await DB.getMeta("chatBg").catch(() => null)) || null);
   await Sync.init().catch((e) => console.warn("[忘紀] 資料夾連結讀取失敗：", e));
   const st = Sync.status();
   if (st.linked && !st.active) toast("本機資料夾需要重新授權，到 ⚙️ 設定按「重新授權」");

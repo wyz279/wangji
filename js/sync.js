@@ -60,14 +60,17 @@ const Sync = (() => {
     const rawDir = await dir(root, "raw");
     const imgDir = await dir(rawDir, "images");
     const items = allMessages.filter((m) => dayKey(m.timestamp) === key).sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+    const fileOf = (m) => (m.type === "image" ? `${m.id}.jpg` : m.type === "sticker" && m.blob ? `${m.id}.png` : null);
     for (const m of items) {
-      if (m.type === "image" && !(await exists(imgDir, `${m.id}.jpg`))) await writeFile(imgDir, `${m.id}.jpg`, m.blob);
+      const f = fileOf(m);
+      if (f && !(await exists(imgDir, f))) await writeFile(imgDir, f, m.blob);
     }
-    const data = items.map((m) =>
-      m.type === "image"
-        ? { id: m.id, timestamp: m.timestamp, type: "image", file: `images/${m.id}.jpg` }
-        : { id: m.id, timestamp: m.timestamp, type: "text", content: m.content }
-    );
+    const data = items.map((m) => {
+      const base = { id: m.id, timestamp: m.timestamp, type: m.type };
+      if (m.type === "image") return { ...base, file: `images/${fileOf(m)}` };
+      if (m.type === "sticker") return { ...base, label: m.label, ...(m.blob ? { file: `images/${fileOf(m)}` } : { emoji: m.emoji }) };
+      return { ...base, content: m.content };
+    });
     await writeFile(rawDir, `${key}.json`, JSON.stringify({ date: key, messages: data }, null, 2));
   }
 
@@ -88,6 +91,8 @@ const Sync = (() => {
         lines.push(s.refined_text, "");
       });
     }
+    const stickers = j.message_ids.map((id) => msgMap.get(id)).filter((m) => m?.type === "sticker");
+    if (stickers.length) lines.push(`貼圖：${stickers.map((m) => (m.emoji ? `${m.emoji} ${m.label}` : m.label)).join("、")}`, "");
     return lines.join("\n");
   }
 
@@ -129,6 +134,26 @@ const Sync = (() => {
   const message = (msg, allMessages) => safe(() => writeRawDay(dayKey(msg.timestamp), allMessages));
   const journal = (j, allMessages) => safe(() => writeJournal(j, allMessages));
 
+  // 刪除手札：把 journals 裡的 json / md 一起刪掉
+  const journalRemoved = (j) =>
+    safe(async () => {
+      const jDir = await dir(root, "journals");
+      const name = journalName(j);
+      await jDir.removeEntry(`${name}.json`).catch(() => {});
+      await jDir.removeEntry(`${name}.md`).catch(() => {});
+    });
+
+  // 刪除訊息：重寫當天 raw，照片檔也一起刪掉
+  const removed = (msg, allMessages) =>
+    safe(async () => {
+      await writeRawDay(dayKey(msg.timestamp), allMessages);
+      const f = msg.type === "image" ? `${msg.id}.jpg` : msg.type === "sticker" && msg.blob ? `${msg.id}.png` : null;
+      if (f) {
+        const imgDir = await dir(await dir(root, "raw"), "images");
+        await imgDir.removeEntry(f).catch(() => {});
+      }
+    });
+
   async function all(allMessages, allJournals) {
     let ok = true;
     warned = false;
@@ -140,5 +165,5 @@ const Sync = (() => {
     return ok && !warned;
   }
 
-  return { init, link, reconnect, status, message, journal, all };
+  return { init, link, reconnect, status, message, journal, journalRemoved, removed, all };
 })();

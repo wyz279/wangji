@@ -25,11 +25,13 @@
 
   <div class="composer-wrap">
     <button id="btnGenerate" class="generate-btn">✨ 一鍵整理</button>
+    <div id="stickerPanel" class="sticker-panel" hidden></div>
     <form id="composer" class="composer">
       <label class="icon-btn" title="上傳照片">
         📷
         <input id="imageInput" type="file" accept="image/*" multiple hidden>
       </label>
+      <button type="button" id="btnStickers" class="icon-btn plain" title="貼圖">😊</button>
       <textarea id="textInput" rows="1" placeholder="想到什麼就丟進來…"></textarea>
       <button type="submit" class="send-btn">送出</button>
     </form>
@@ -64,6 +66,11 @@
   </label>
   <p id="keyStatus" class="hint"></p>
   <p class="hint">Key 只存在你這台裝置的瀏覽器裡，不會上傳到 GitHub 或任何地方。</p>
+  <div class="dev-tools">
+    <p class="hint">聊天室背景</p>
+    <label class="file-btn ghost">選擇圖片<input id="bgInput" type="file" accept="image/*" hidden></label>
+    <button type="button" id="btnBgRemove" class="ghost">移除背景</button>
+  </div>
   <div id="folderSync" class="dev-tools">
     <p class="hint">本機資料夾（自動把原始紀錄存到 raw/、整理後的手札存到 journals/）</p>
     <p id="folderStatus" class="hint"></p>
@@ -95,6 +102,7 @@
 
 <script src="js/db.js"></script>
 <script src="js/prompts.js"></script>
+<script src="js/stickers.js"></script>
 <script src="js/generate.js"></script>
 <script src="js/render.js"></script>
 <script src="js/sample.js"></script>

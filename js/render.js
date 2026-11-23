@@ -10,6 +10,16 @@ const Render = (() => {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
 
+  // 貼圖的樣子：內建是 emoji，自訂是圖片
+  const stickerFace = (m) => (m.blob ? `<img src="${imgURL(m)}" alt="${esc(m.label)}">` : esc(m.emoji));
+
+  // 用 id 算出固定的「隨機」數，讓同一張貼紙每次都貼在一樣的角度和位置
+  function hash(str) {
+    let h = 0;
+    for (const c of str) h = (h * 31 + c.charCodeAt(0)) | 0;
+    return Math.abs(h);
+  }
+
   const pad = (n) => String(n).padStart(2, "0");
   const time = (iso) => {
     const d = new Date(iso);
@@ -30,7 +40,8 @@ const Render = (() => {
   const range = ([a, b]) => (date(a) === date(b) ? `${date(a)} ${time(a)}～${time(b)}` : `${date(a)} ${time(a)}～${date(b)} ${time(b)}`);
 
   // 聊天室：未整理的訊息 + 已整理成手札的「小卡」（放在該手札最後一則訊息的時間點）
-  function chat(msgs, journals = []) {
+  // ui：{ selectedId, editingId } 目前選取／編輯中的訊息
+  function chat(msgs, journals = [], ui = {}) {
     if (msgs.length === 0 && journals.length === 0) {
       return `<p class="empty-hint">今天發生什麼事？<br>想到什麼就丟進來，晚點再一鍵整理成手札。</p>`;
     }
@@ -54,10 +65,30 @@ const Render = (() => {
             <span>${times(j.range)}・點我查看</span>
           </button>`;
         }
-        const body = m.type === "image" ? `<img src="${imgURL(m)}" alt="照片">` : `<div class="bubble">${esc(m.content)}</div>`;
-        const tag = m.journal_id === "processing" ? `<span class="tag">整理中</span>` : "";
-        const cls = m.journal_id === "processing" ? "msg processing" : "msg";
-        return html + `<div class="${cls}">${body}<span class="msg-meta">${time(m.timestamp)}${tag}</span></div>`;
+        const processing = m.journal_id === "processing";
+        const editing = ui.editingId === m.id;
+        let body;
+        if (editing) {
+          body = `<div class="edit-box">
+            <textarea id="editInput" rows="3">${esc(m.content)}</textarea>
+            <div class="msg-actions"><button data-act="cancel">取消</button><button data-act="save" class="save">儲存</button></div>
+          </div>`;
+        } else {
+          body =
+            m.type === "image"
+              ? `<img src="${imgURL(m)}" alt="照片">`
+              : m.type === "sticker"
+                ? `<div class="chat-sticker" title="${esc(m.label)}">${stickerFace(m)}</div>`
+                : `<div class="bubble">${esc(m.content)}</div>`;
+        }
+        const tag = processing ? `<span class="tag">整理中</span>` : "";
+        const edited = m.edited ? "・已編輯" : "";
+        const actions =
+          ui.selectedId === m.id && !editing && !processing
+            ? `<div class="msg-actions">${m.type === "text" ? `<button data-act="edit">編輯</button>` : ""}<button data-act="delete" class="del">刪除</button></div>`
+            : "";
+        const cls = ["msg", processing ? "processing" : "selectable", ui.selectedId === m.id ? "selected" : ""].join(" ");
+        return html + `<div class="${cls}" data-id="${m.id}">${body}<span class="msg-meta">${time(m.timestamp)}${edited}${tag}</span>${actions}</div>`;
       })
       .join("");
   }
@@ -118,34 +149,131 @@ const Render = (() => {
       .filter((m) => m && m.type === "image")
       .map((m) => `<img src="${imgURL(m)}" alt="照片">`)
       .join("");
-    return `<div class="memo">${blocks}${photos ? `<div class="memo-gallery">${photos}</div>` : ""}</div>`;
+    const stks = stickersOf(j, msgMap)
+      .slice(0, 5)
+      .map((m) => pageSticker(m, ""))
+      .join("");
+    return `<div class="memo">${stks ? `<div class="memo-stickers">${stks}</div>` : ""}${blocks}${photos ? `<div class="memo-gallery">${photos}</div>` : ""}</div>`;
   }
 
   // 其他風格：一整篇文章，照片依時間穿插在段落旁，左右交錯
+  const stickersOf = (j, msgMap) =>
+    j.message_ids
+      .map((id) => msgMap.get(id))
+      .filter((m) => m && m.type === "sticker")
+      .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+
+  // 貼圖屬於哪一段：開始時間不晚於貼圖時間的最後一段（跨午夜也算得對）
+  function sectionFor(ts, sections, startISO) {
+    const start = new Date(startISO);
+    const t = Date.parse(ts);
+    let idx = 0;
+    sections.forEach((s, i) => {
+      const m = /^(\d{1,2}):(\d{2})/.exec(s.time_range || "");
+      if (!m) return;
+      const d = new Date(start);
+      d.setHours(+m[1], +m[2], 0, 0);
+      if (d < start - 60000) d.setDate(d.getDate() + 1);
+      if (d.getTime() <= t) idx = i;
+    });
+    return idx;
+  }
+
+  function pageSticker(m, side) {
+    const h = hash(m.id);
+    const rot = (h % 2 ? 1 : -1) * (6 + (h % 9)); // 左歪或右歪 6°～14°
+    return `<span class="page-sticker ${side}" style="--rot:${rot}deg" title="${esc(m.label)}">${stickerFace(m)}</span>`;
+  }
+
   function articleBody(j, msgMap) {
     let side = 0;
+    const bySection = new Map();
+    stickersOf(j, msgMap).forEach((m) => {
+      const i = sectionFor(m.timestamp, j.result.sections, j.range[0]);
+      bySection.set(i, [...(bySection.get(i) || []), m]);
+    });
     const paras = j.result.sections
-      .map((s) => {
+      .map((s, i) => {
         const figs = imgsOf(s, msgMap)
           .map((m) => `<figure class="para-img ${side++ % 2 ? "left" : "right"}"><img src="${imgURL(m)}" alt="照片"></figure>`)
           .join("");
-        return `${figs}<p>${esc(s.refined_text)}</p>`;
+        // 貼紙貼在照片的另一側，看起來比較不擠
+        const hasImg = figs !== "";
+        const stks = (bySection.get(i) || [])
+          .map((m, k) => pageSticker(m, hasImg ? ((side + k) % 2 ? "left" : "right") : (hash(m.id) >> 3) % 2 ? "left" : "right"))
+          .join("");
+        return `${figs}${stks}<p>${esc(s.refined_text)}</p>`;
       })
       .join("");
     return `<article class="article">${paras}<div class="clear"></div></article>`;
   }
 
-  function journal(j, msgMap) {
+  // nav：{ prev, next } 前一篇／後一篇手札（沒有就是 null）
+  function journal(j, msgMap, nav = {}) {
     const body = j.style === "memo" ? memoBody(j, msgMap) : articleBody(j, msgMap);
-    return `<button class="reader-back" id="btnReaderBack">← 所有手札</button>
+    const navBtn = (x, dir) =>
+      x
+        ? `<button class="nav-turn" data-dir="${dir}">${dir === "prev" ? `← 前一篇 ${dayLabel(x)}` : `${dayLabel(x)} 後一篇 →`}</button>`
+        : `<span></span>`;
+    return `<div class="reader-top">
+        <button class="reader-back" id="btnReaderBack">← 所有手札</button>
+        <div class="reader-actions">
+          <button id="btnEditJournal">✏️ 編輯</button>
+          <button id="btnDeleteJournal" class="del">🗑️ 刪除</button>
+        </div>
+      </div>
       <h2 class="reader-title">${dayLabel(j)}</h2>
       <p class="reader-summary">${esc(j.result.title)}</p>
-      <p class="reader-range">${times(j.range)}</p>
+      <p class="reader-range">${times(j.range)}${j.result.edited ? "・已手動編輯" : ""}</p>
       <div class="reader-styles">
         <div class="label">換個風格看看（✓ 表示已生成過，切換不用等）</div>
         <div class="style-picker" id="readerStyles">${stylePicker(j.style, Object.keys(j.versions || {}))}</div>
       </div>
-      <div id="readerSections">${body}</div>`;
+      <div id="readerSections">${body}</div>
+      <nav class="reader-nav" id="readerNav">${navBtn(nav.prev, "prev")}${navBtn(nav.next, "next")}</nav>`;
+  }
+
+  // 手札編輯畫面：標題＋每一段（備忘錄是每個分類）一個文字框
+  function journalEditor(j) {
+    const blocks = j.result.sections
+      .map((s, i) => {
+        const label = j.style === "memo" ? s.section_title : `第 ${i + 1} 段${s.time_range ? `（${s.time_range}）` : ""}`;
+        const rows = Math.min(14, Math.max(3, Math.ceil(s.refined_text.length / 32) + s.refined_text.split("\n").length));
+        return `<label class="edit-label">${esc(label)}
+          <textarea class="edit-section" data-i="${i}" rows="${rows}">${esc(s.refined_text)}</textarea>
+        </label>`;
+      })
+      .join("");
+    return `<div class="reader-top">
+        <span class="reader-back">編輯 ${dayLabel(j)} 的手札（${STYLES[j.style].name}）</span>
+      </div>
+      <div class="journal-editor">
+        <label class="edit-label">一句話總結
+          <input id="editTitle" value="${esc(j.result.title)}">
+        </label>
+        ${blocks}
+        <p class="hint">只會修改目前這個風格的版本。${j.style === "memo" ? "條列請保留每行開頭的「- 」。" : ""}</p>
+        <div class="dlg-actions">
+          <button id="btnEditCancel" class="ghost">取消</button>
+          <button id="btnEditSave" class="primary">儲存</button>
+        </div>
+      </div>`;
+  }
+
+  // 貼圖面板：內建貼圖＋自己上傳的貼圖＋新增按鈕
+  function stickerPanel(custom = []) {
+    const builtIn = STICKERS.map(
+      (st) => `<button type="button" class="stk" data-key="${st.key}" title="${st.label}"><span class="stk-face">${st.emoji}</span><small>${st.label}</small></button>`
+    ).join("");
+    const mine = custom
+      .map(
+        (c) => `<button type="button" class="stk" data-custom="${c.id}" title="${esc(c.label)}">
+          <span class="stk-face"><img src="${imgURL({ id: `pack_${c.id}`, blob: c.blob })}" alt=""></span><small>${esc(c.label)}</small>
+          <span class="stk-del" data-del="${c.id}" title="從貼圖庫移除">×</span>
+        </button>`
+      )
+      .join("");
+    return `${builtIn}${mine}<label class="stk stk-add" title="上傳自己的貼圖"><span class="stk-face">＋</span><small>自己的貼圖</small><input id="stickerUpload" type="file" accept="image/*" hidden></label>`;
   }
 
   // 主題選單：每個選項附一條色票
@@ -160,5 +288,5 @@ const Render = (() => {
       .join("");
   }
 
-  return { chat, journalList, journal, range, stylePicker, themeGrid, dayLabel };
+  return { chat, journalList, journal, journalEditor, range, stylePicker, themeGrid, stickerPanel, dayLabel };
 })();

@@ -36,6 +36,7 @@ const DB = (() => {
   const getAll = (storeName) => request(storeName, "readonly", (s) => s.getAll());
   const getMeta = (key) => request("meta", "readonly", (s) => s.get(key));
   const setMeta = (key, value) => request("meta", "readwrite", (s) => s.put(value, key));
+  const remove = (storeName, id) => request(storeName, "readwrite", (s) => s.delete(id));
 
   async function putMany(storeName, items) {
     const db = await open();
@@ -61,5 +62,5 @@ const DB = (() => {
     });
   }
 
-  return { getAll, put, putMany, clearAll, getMeta, setMeta };
+  return { getAll, put, putMany, clearAll, getMeta, setMeta, remove };
 })();

@@ -13,11 +13,14 @@ const Gen = (() => {
   const byTime = (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp);
 
   // 把訊息轉成送給 AI 的時間軸文字（照片只送佔位符）。raw 風格要附上每則訊息的 id
+  // 貼圖只當「當下情緒」的參考：寫成 [貼圖：😭 大哭]；原汁原味不需要，直接略過
   function formatTimeline(msgs, withIds = false, skipImages = false) {
     return msgs
       .filter((m) => !(skipImages && m.type === "image"))
+      .filter((m) => !(withIds && m.type === "sticker"))
       .map((m) => {
         const t = `[${stamp(m.timestamp)}]`;
+        if (m.type === "sticker") return `${t} [貼圖：${m.emoji ? m.emoji + " " : ""}${m.label}]`;
         if (withIds) return `${t} (${m.id}) ${m.type === "image" ? "[圖片]" : m.content}`;
         return m.type === "image" ? `${t} [圖片 ${m.id}]` : `${t} ${m.content}`;
       })
