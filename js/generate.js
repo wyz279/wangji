@@ -109,6 +109,14 @@ const Gen = (() => {
       if (count > 1 && imageIds.includes(id)) errors.push(`照片 ${id} 重複出現 ${count} 次，每張只能放一次`);
     });
 
+    // 長度上限：避免 AI 自己加戲寫成長篇（倍數 × 原文字數 + 40）
+    const LENGTH_CAP = { daily: 1.4, doomsday: 2, optimist: 3, social: 1.2 };
+    if (LENGTH_CAP[styleKey] && inputText) {
+      const limit = Math.round(LENGTH_CAP[styleKey] * inputText.length + 40);
+      const total = obj.sections.reduce((n, s) => n + (s.refined_text || "").length, 0);
+      if (total > limit) errors.push(`寫太長了：原文 ${inputText.length} 字，你寫了 ${total} 字，請精簡到 ${limit} 字以內，不要自己加戲`);
+    }
+
     const written = [obj.title, ...obj.sections.flatMap((s) => [s.section_title || "", s.refined_text || ""])].join("");
     const simp = findSimplified(written, inputText);
     if (simp.length) errors.push(`出現簡體字「${simp.join("、")}」，請全部改成繁體中文`);

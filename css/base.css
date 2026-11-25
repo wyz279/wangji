@@ -26,6 +26,8 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   background: var(--paper);
 }
 .logo { margin: 0; font-size: 1.3rem; font-family: var(--font-journal); letter-spacing: 0.15em; }
+.logo-btn { border: none; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; padding: 0; cursor: pointer; }
+.logo-btn:hover { color: var(--accent); }
 .topbar nav { display: flex; gap: 6px; }
 .nav-btn {
   background: transparent;
@@ -442,10 +444,13 @@ mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: in
 }
 .article p { margin: 0 0 1.1em; line-height: 2; white-space: pre-wrap; word-break: break-word; }
 .article p:last-of-type { margin-bottom: 0; }
-/* clear：新照片要等上一張照片結束才開始，避免文字被左右兩張照片夾成一條窄直排 */
-.para-img { width: 42%; margin: 4px 0 12px; clear: both; }
-.para-img.right { float: right; margin-left: 20px; }
-.para-img.left { float: left; margin-right: 20px; }
+/* 每段自成一個區塊（flow-root），照片只在自己這段裡排，避免文字被左右兩張照片夾成窄直排 */
+.para { display: flow-root; }
+.para + .para { margin-top: 1.1em; }
+.para p { margin: 0; }
+.para-img { width: 42%; margin: 4px 0 12px; }
+.para-img.right { float: right; clear: right; margin-left: 20px; }
+.para-img.left { float: left; clear: left; margin-right: 20px; }
 .para-img img {
   width: 100%;
   display: block;
@@ -589,6 +594,15 @@ mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: in
 .style-chip.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .style-chip .cached { opacity: 0.7; font-size: 0.75rem; margin-left: 2px; }
 .reader-styles { margin-bottom: 20px; }
+.rewrite-btn {
+  margin-left: 8px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 0.78rem;
+}
 .reader-styles .label { font-family: system-ui, sans-serif; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
 .rewriting { opacity: 0.45; pointer-events: none; }
 

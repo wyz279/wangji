@@ -369,7 +369,7 @@ const Render = (() => {
   }
 
   function articleBody(j, msgMap) {
-    let side = 0;
+    let side = 0; // 有照片的段落輪流放右、左；同一段的照片都放同一側、上下疊
     const bySection = new Map();
     stickersOf(j, msgMap).forEach((m) => {
       const i = sectionFor(m.timestamp, j.result.sections, j.range[0]);
@@ -377,15 +377,17 @@ const Render = (() => {
     });
     const paras = j.result.sections
       .map((s, i) => {
-        const figs = imgsOf(s, msgMap)
-          .map((m) => `<figure class="para-img ${side++ % 2 ? "left" : "right"}"><img src="${imgURL(m)}" alt="照片"></figure>`)
-          .join("");
+        const imgs = imgsOf(s, msgMap);
+        const imgSide = side % 2 ? "left" : "right";
+        if (imgs.length) side++;
+        const figs = imgs.map((m) => `<figure class="para-img ${imgSide}"><img src="${imgURL(m)}" alt="照片"></figure>`).join("");
         // 貼紙貼在照片的另一側，看起來比較不擠
         const hasImg = figs !== "";
         const stks = (bySection.get(i) || [])
-          .map((m, k) => pageSticker(m, hasImg ? ((side + k) % 2 ? "left" : "right") : (hash(m.id) >> 3) % 2 ? "left" : "right"))
+          .map((m) => pageSticker(m, hasImg ? (imgSide === "right" ? "left" : "right") : (hash(m.id) >> 3) % 2 ? "left" : "right"))
           .join("");
-        return `${figs}${stks}<p>${esc(s.refined_text)}</p>`;
+        // 每段包成一個區塊：照片只在自己這段裡排，不會跑去夾住下一段的文字
+        return `<div class="para">${figs}${stks}<p>${esc(s.refined_text)}</p></div>`;
       })
       .join("");
     return `<article class="article">${paras}<div class="clear"></div></article>`;
@@ -450,7 +452,7 @@ const Render = (() => {
       <p class="reader-summary">${esc(j.result.title)}</p>
       <p class="reader-range">${times(j.range)}${j.mood ? `・${esc(j.mood.emoji)} ${esc(j.mood.label)}` : ""}${j.result.edited ? "・已手動編輯" : ""}</p>
       <div class="reader-styles">
-        <div class="label">換個風格看看（✓ 表示已生成過，切換不用等）</div>
+        <div class="label">換個風格看看（✓ 表示已生成過，切換不用等）<button class="rewrite-btn" id="btnRewrite" title="不滿意目前的版本？用同一個風格重新生成">↻ 重寫這個風格</button></div>
         <div class="style-picker" id="readerStyles">${stylePicker(j.style, Object.keys(j.versions || {}))}</div>
       </div>
       <div id="readerSections">${body}</div>

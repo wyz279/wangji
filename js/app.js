@@ -568,6 +568,10 @@ function showJournal(id, compare = false) {
     showJournal(j.id, !compare);
     reader.scrollTop = top;
   };
+  $("#btnRewrite").onclick = () => {
+    if (j.result.edited && !confirm("這個版本有手動編輯過，重寫會蓋掉你的修改，確定嗎？")) return;
+    switchStyle(j, j.style, true);
+  };
   $("#btnExport").onclick = () => exportImage(j);
   $("#btnEditJournal").onclick = () => editJournal(j);
   $("#btnDeleteJournal").onclick = () => deleteJournal(j);
@@ -615,9 +619,9 @@ function turnTo(dir) {
   else toast(dir === "prev" ? "這是最早的一篇了" : "這是最新的一篇了");
 }
 
-// 手札換風格：生成過的直接切換，沒生成過的用同一批訊息重寫
-async function switchStyle(j, style) {
-  if (j.versions[style]) {
+// 手札換風格：生成過的直接切換，沒生成過的用同一批訊息重寫；force＝不管有沒有生成過都重寫
+async function switchStyle(j, style, force = false) {
+  if (j.versions[style] && !force) {
     j.style = style;
     j.result = j.versions[style];
     await DB.put("journals", j);
@@ -817,6 +821,7 @@ function bind() {
   });
   $("#btnToJournals").addEventListener("click", showJournalList);
   $("#btnToChat").addEventListener("click", () => showView("chat"));
+  $("#btnLogo").addEventListener("click", () => showView("chat")); // 點左上角「忘紀」回聊天室
   $("#btnSettings").addEventListener("click", openSettings);
   $("#btnTheme").addEventListener("click", openThemePicker);
   $("#chatList").addEventListener("click", onChatClick);
