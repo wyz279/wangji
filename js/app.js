@@ -550,6 +550,7 @@ function showJournal(id, compare = false) {
   showView("journal");
   currentJournalId = id;
   const msgMap = new Map(messages.map((m) => [m.id, m]));
+  reader.onclick = null; // 清掉編輯模式的點擊處理
   reader.innerHTML = Render.journal(j, msgMap, neighbors(id), compare);
   reader.hidden = false;
   reader.scrollTop = 0;
@@ -581,22 +582,84 @@ function showJournal(id, compare = false) {
 function editJournal(j) {
   if (rewriting) return toast("正在重寫風格，等一下再編輯");
   const reader = $("#journalReader");
-  reader.innerHTML = Render.journalEditor(j);
+  const msgMap = new Map(messages.map((m) => [m.id, m]));
+  // 草稿：深拷貝目前版本，按儲存才寫回
+  const draft = JSON.parse(JSON.stringify(j.result));
+  draft.photo_notes = draft.photo_notes || {};
+  draft.sticker_place = draft.sticker_place || {};
+  draft.hidden_images = draft.hidden_images || [];
+  draft.hidden_stickers = draft.hidden_stickers || [];
+
+  // 重畫前先把輸入框裡的字收進草稿，才不會因為按了按鈕就把打到一半的字弄丟
+  const collect = () => {
+    draft.title = $("#editTitle").value;
+    reader.querySelectorAll(".edit-section").forEach((t) => (draft.sections[t.dataset.i].refined_text = t.value));
+    reader.querySelectorAll(".edit-note").forEach((t) => (draft.photo_notes[t.dataset.id] = t.value.trim()));
+    reader.querySelectorAll(".edit-layout").forEach((sel) => (draft.sections[sel.dataset.i].layout = sel.value));
+  };
+  const draw = () => {
+    const top = reader.scrollTop;
+    reader.innerHTML = Render.journalEditor(j, draft, msgMap);
+    reader.scrollTop = top;
+  };
+  const sectionOfImg = (id) => draft.sections.findIndex((s) => s.matched_images.includes(id));
+  const moveImg = (id, to) => {
+    const from = sectionOfImg(id);
+    if (from < 0 || to < 0 || to >= draft.sections.length) return;
+    draft.sections[from].matched_images = draft.sections[from].matched_images.filter((x) => x !== id);
+    draft.sections[to].matched_images.push(id);
+  };
+  const stickerPos = (id) => Render.stickerLayout({ ...j, result: draft }, msgMap).get(id);
+
+  draw();
   reader.scrollTop = 0;
-  $("#btnEditCancel").onclick = () => showJournal(j.id);
-  $("#btnEditSave").onclick = async () => {
-    const title = $("#editTitle").value.trim();
-    const texts = [...reader.querySelectorAll(".edit-section")].map((t) => t.value.trim());
-    if (!title) return toast("總結不能是空的");
-    if (texts.some((t) => !t)) return toast("有段落是空的，不要的內容請刪掉文字但至少留一句");
-    j.result.title = title;
-    texts.forEach((t, i) => (j.result.sections[i].refined_text = t));
-    j.result.edited = true;
-    j.versions[j.style] = j.result;
-    await DB.put("journals", j);
-    Sync.journal(j, messages);
-    showJournal(j.id);
-    toast("已儲存修改");
+  reader.onclick = async (e) => {
+    const b = e.target.closest("[data-act]");
+    if (b) {
+      collect();
+      const id = b.dataset.id;
+      const act = b.dataset.act;
+      if (act === "img-up") moveImg(id, sectionOfImg(id) - 1);
+      if (act === "img-down") moveImg(id, sectionOfImg(id) + 1);
+      if (act === "img-hide") {
+        const i = sectionOfImg(id);
+        draft.sections[i].matched_images = draft.sections[i].matched_images.filter((x) => x !== id);
+        draft.hidden_images.push(id);
+      }
+      if (act === "img-back") {
+        draft.hidden_images = draft.hidden_images.filter((x) => x !== id);
+        draft.sections[Render.sectionFor(msgMap.get(id).timestamp, draft.sections, j.range[0])].matched_images.push(id);
+      }
+      if (act === "stk-up" || act === "stk-down" || act === "stk-side") {
+        const pos = stickerPos(id);
+        const place = { s: pos.s, side: pos.side };
+        if (act === "stk-up") place.s = Math.max(0, pos.s - 1);
+        if (act === "stk-down") place.s = Math.min(draft.sections.length - 1, pos.s + 1);
+        if (act === "stk-side") place.side = pos.side === "left" ? "right" : "left";
+        draft.sticker_place[id] = place;
+      }
+      if (act === "stk-hide") draft.hidden_stickers.push(id);
+      if (act === "stk-back") draft.hidden_stickers = draft.hidden_stickers.filter((x) => x !== id);
+      // 版型要跟著照片張數變
+      draft.sections.forEach((s) => (s.layout = normalizeLayout(s.layout, s.matched_images.length)));
+      return draw();
+    }
+    if (e.target.id === "btnEditCancel") return showJournal(j.id);
+    if (e.target.id === "btnEditSave") {
+      collect();
+      draft.title = draft.title.trim();
+      draft.sections.forEach((s) => (s.refined_text = s.refined_text.trim()));
+      if (!draft.title) return toast("總結不能是空的");
+      if (draft.sections.some((s) => !s.refined_text)) return toast("有段落是空的，不要的內容請刪掉文字但至少留一句");
+      draft.edited = true;
+      j.result = draft;
+      j.versions[j.style] = draft;
+      await DB.put("journals", j);
+      Sync.journal(j, messages);
+      reader.onclick = null;
+      showJournal(j.id);
+      toast("已儲存修改");
+    }
   };
 }
 

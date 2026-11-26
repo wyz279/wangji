@@ -176,6 +176,18 @@ const Gen = (() => {
     return null;
   }
 
+  // 照片版型依張數校正；photo_notes 只留存在的照片、每句最多 30 字（只在編輯畫面顯示）
+  function tidyPhotos(obj, imageIds) {
+    obj.sections.forEach((s) => (s.layout = normalizeLayout(s.layout, (s.matched_images || []).length)));
+    const notes = {};
+    if (obj.photo_notes && typeof obj.photo_notes === "object") {
+      Object.entries(obj.photo_notes).forEach(([id, text]) => {
+        if (imageIds.includes(id) && isText(text)) notes[id] = text.trim().slice(0, 30);
+      });
+    }
+    obj.photo_notes = notes;
+  }
+
   async function callGroq(key, messages) {
     let res;
     try {
@@ -245,6 +257,7 @@ const Gen = (() => {
 
       if (result.errors.length === 0) {
         if (result.missing.length) placeMissing(obj, result.missing, msgs);
+        tidyPhotos(obj, imageIds);
         return { result: obj, tries: attempt };
       }
 

@@ -368,30 +368,69 @@ const Render = (() => {
     return `<span class="page-sticker ${side}" style="--rot:${rot}deg">${stickerFace(m)}</span>`;
   }
 
-  function articleBody(j, msgMap) {
-    let side = 0; // 有照片的段落輪流放右、左；同一段的照片都放同一側、上下疊
-    const bySection = new Map();
+  // 貼紙放在哪一段、哪一側：有手動調整（result.sticker_place）就用手動的，否則依時間自動放
+  // 手動拿掉的貼紙記在 result.hidden_stickers
+  function stickerLayout(j, msgMap) {
+    const n = j.result.sections.length;
+    const manual = j.result.sticker_place || {};
+    const hidden = j.result.hidden_stickers || [];
+    const sides = floatSides(j, msgMap);
+    const out = new Map();
     stickersOf(j, msgMap).forEach((m) => {
-      const i = sectionFor(m.timestamp, j.result.sections, j.range[0]);
-      bySection.set(i, [...(bySection.get(i) || []), m]);
+      if (hidden.includes(m.id)) return;
+      const s = sectionFor(m.timestamp, j.result.sections, j.range[0]);
+      // 自動側邊：那段有浮動照片就放另一側，沒有就依 id 決定
+      const autoSide = (sec) => (sides[sec] ? (sides[sec] === "right" ? "left" : "right") : (hash(m.id) >> 3) % 2 ? "left" : "right");
+      const man = manual[m.id] && manual[m.id].s < n ? manual[m.id] : null;
+      const sec = man ? man.s : s;
+      out.set(m.id, { m, s: sec, side: (man && man.side) || autoSide(sec) });
     });
+    return out;
+  }
+
+  // 每段浮動照片（側邊圖／拍立得）在哪一側：有這種照片的段落輪流放右、左；其他段落是 null
+  function floatSides(j, msgMap) {
+    let turn = 0;
+    return j.result.sections.map((s) => {
+      const count = imgsOf(s, msgMap).length;
+      const layout = normalizeLayout(s.layout || "side", count);
+      if (!count || (layout !== "side" && layout !== "polaroid")) return null;
+      return turn++ % 2 ? "left" : "right";
+    });
+  }
+
+  // 一段的照片依版型排：hero 大圖、side 側邊、polaroid 拍立得、pair 兩張並排、collage 拼貼
+  function photoBlock(imgs, layout, side) {
+    const img = (m) => `<img src="${imgURL(m)}" alt="照片">`;
+    if (!imgs.length) return "";
+    if (layout === "hero") return `<figure class="para-hero">${img(imgs[0])}</figure>`;
+    if (layout === "pair") return `<div class="para-grid pair">${imgs.map((m) => `<figure>${img(m)}</figure>`).join("")}</div>`;
+    if (layout === "collage") return `<div class="para-grid collage">${imgs.map((m) => `<figure>${img(m)}</figure>`).join("")}</div>`;
+    if (layout === "polaroid") {
+      return imgs.map((m) => `<figure class="para-polaroid ${side}" style="--rot:${(hash(m.id) % 2 ? 1 : -1) * (3 + (hash(m.id) % 4))}deg">${img(m)}</figure>`).join("");
+    }
+    return imgs.map((m) => `<figure class="para-img ${side}">${img(m)}</figure>`).join("");
+  }
+
+  function articleBody(j, msgMap) {
+    const sides = floatSides(j, msgMap);
+    const stickers = [...stickerLayout(j, msgMap).values()];
     const paras = j.result.sections
       .map((s, i) => {
         const imgs = imgsOf(s, msgMap);
-        const imgSide = side % 2 ? "left" : "right";
-        if (imgs.length) side++;
-        const figs = imgs.map((m) => `<figure class="para-img ${imgSide}"><img src="${imgURL(m)}" alt="照片"></figure>`).join("");
-        // 貼紙貼在照片的另一側，看起來比較不擠
-        const hasImg = figs !== "";
-        const stks = (bySection.get(i) || [])
-          .map((m) => pageSticker(m, hasImg ? (imgSide === "right" ? "left" : "right") : (hash(m.id) >> 3) % 2 ? "left" : "right"))
+        const layout = normalizeLayout(s.layout || "side", imgs.length);
+        const stks = stickers
+          .filter((x) => x.s === i)
+          .map((x) => pageSticker(x.m, x.side))
           .join("");
         // 每段包成一個區塊：照片只在自己這段裡排，不會跑去夾住下一段的文字
-        return `<div class="para">${figs}${stks}<p>${esc(s.refined_text)}</p></div>`;
+        return `<div class="para">${photoBlock(imgs, layout, sides[i] || "right")}${stks}<p>${esc(s.refined_text)}</p></div>`;
       })
       .join("");
     return `<article class="article">${paras}<div class="clear"></div></article>`;
   }
+
+
 
   // 原文對照：左邊是當時隨手丟的原始紀錄，右邊是 AI 整理後的段落，依時間一段一段對齊
   function compareBody(j, msgMap) {
@@ -460,31 +499,97 @@ const Render = (() => {
   }
 
   // 手札編輯畫面：標題＋每一段（備忘錄是每個分類）一個文字框
-  function journalEditor(j) {
-    const blocks = j.result.sections
+  // 手札編輯畫面。draft 是正在編輯的草稿（按儲存才會寫回）
+  // 一整篇的風格：每段可以改文字、換照片版型、照片換段落／拿掉、看 AI 推測的照片說明（只在這裡顯示）、貼紙換段落／左右／拿掉
+  function journalEditor(j, draft, msgMap) {
+    const isMemo = j.style === "memo";
+    const n = draft.sections.length;
+    const pseudo = { ...j, result: draft };
+    const stickers = isMemo ? [] : [...stickerLayout(pseudo, msgMap).values()];
+    const notes = draft.photo_notes || {};
+    const btn = (act, id, label, title, off = false) =>
+      `<button type="button" class="mini-btn" data-act="${act}" data-id="${id}" title="${title}"${off ? " disabled" : ""}>${label}</button>`;
+
+    const blocks = draft.sections
       .map((s, i) => {
-        const label = j.style === "memo" ? s.section_title : `第 ${i + 1} 段${s.time_range ? `（${s.time_range}）` : ""}`;
+        const label = isMemo ? s.section_title : `第 ${i + 1} 段${s.time_range ? `（${s.time_range}）` : ""}`;
         const rows = Math.min(14, Math.max(3, Math.ceil(s.refined_text.length / 32) + s.refined_text.split("\n").length));
-        return `<label class="edit-label">${esc(label)}
-          <textarea class="edit-section" data-i="${i}" rows="${rows}">${esc(s.refined_text)}</textarea>
-        </label>`;
+        const text = `<textarea class="edit-section" data-i="${i}" rows="${rows}">${esc(s.refined_text)}</textarea>`;
+        if (isMemo) return `<label class="edit-label">${esc(label)}${text}</label>`;
+
+        const imgs = imgsOf(s, msgMap);
+        const layouts = layoutsFor(imgs.length);
+        const layout = normalizeLayout(s.layout, imgs.length);
+        const layoutSel = layouts.length
+          ? `<label class="edit-layout-label">照片版型
+              <select class="edit-layout" data-i="${i}">${layouts.map((k) => `<option value="${k}"${k === layout ? " selected" : ""}>${LAYOUTS[k]}</option>`).join("")}</select>
+            </label>`
+          : "";
+        const photos = imgs
+          .map(
+            (m) => `<div class="edit-photo">
+              <img src="${imgURL(m)}" alt="照片">
+              <div class="edit-photo-side">
+                <input class="edit-note" data-id="${m.id}" value="${esc(notes[m.id] || "")}" placeholder="照片說明（只在編輯時看得到）">
+                <div class="mini-row">
+                  ${btn("img-up", m.id, "↑ 上一段", "移到上一段", i === 0)}
+                  ${btn("img-down", m.id, "↓ 下一段", "移到下一段", i === n - 1)}
+                  ${btn("img-hide", m.id, "拿掉", "不在手札裡顯示（原始照片還在）")}
+                </div>
+              </div>
+            </div>`
+          )
+          .join("");
+        const stks = stickers
+          .filter((x) => x.s === i)
+          .map(
+            (x) => `<div class="edit-sticker">
+              <span class="edit-sticker-face">${stickerFace(x.m)}</span>
+              <div class="mini-row">
+                ${btn("stk-up", x.m.id, "↑", "移到上一段", i === 0)}
+                ${btn("stk-down", x.m.id, "↓", "移到下一段", i === n - 1)}
+                ${btn("stk-side", x.m.id, x.side === "left" ? "放右邊" : "放左邊", "換到另一側")}
+                ${btn("stk-hide", x.m.id, "拿掉", "不在手札裡顯示")}
+              </div>
+            </div>`
+          )
+          .join("");
+        return `<div class="edit-box">
+          <div class="edit-head"><span>${esc(label)}</span>${layoutSel}</div>
+          ${text}
+          ${photos || stks ? `<div class="edit-media">${photos}${stks ? `<div class="edit-stickers">${stks}</div>` : ""}</div>` : ""}
+        </div>`;
       })
       .join("");
+
+    // 拿掉的照片和貼紙，可以放回去
+    const hiddenImgs = (draft.hidden_images || []).map((id) => msgMap.get(id)).filter(Boolean);
+    const hiddenStks = (draft.hidden_stickers || []).map((id) => msgMap.get(id)).filter(Boolean);
+    const hiddenArea =
+      hiddenImgs.length || hiddenStks.length
+        ? `<div class="edit-hidden"><span class="hint">已拿掉（點「放回」會放回時間最接近的段落）</span>
+            ${hiddenImgs.map((m) => `<div class="edit-hidden-item"><img src="${imgURL(m)}" alt="照片">${btn("img-back", m.id, "放回", "放回手札")}</div>`).join("")}
+            ${hiddenStks.map((m) => `<div class="edit-hidden-item"><span class="edit-sticker-face">${stickerFace(m)}</span>${btn("stk-back", m.id, "放回", "放回手札")}</div>`).join("")}
+          </div>`
+        : "";
+
     return `<div class="reader-top">
         <span class="reader-back">編輯 ${dayLabel(j)} 的手札（${STYLES[j.style].name}）</span>
       </div>
       <div class="journal-editor">
         <label class="edit-label">一句話總結
-          <input id="editTitle" value="${esc(j.result.title)}">
+          <input id="editTitle" value="${esc(draft.title)}">
         </label>
         ${blocks}
-        <p class="hint">只會修改目前這個風格的版本。${j.style === "memo" ? "條列請保留每行開頭的「- 」。" : ""}</p>
+        ${hiddenArea}
+        <p class="hint">只會修改目前這個風格的版本。${isMemo ? "條列請保留每行開頭的「- 」。" : "照片說明是 AI 依前後訊息推測的，只在這裡顯示，手札上不會出現。"}</p>
         <div class="dlg-actions">
           <button id="btnEditCancel" class="ghost">取消</button>
           <button id="btnEditSave" class="primary">儲存</button>
         </div>
       </div>`;
   }
+
 
   // 貼圖面板：上排分類分頁（最近／各類表情／自己的），下面是貼圖格子，不顯示文字
   function stickerPanel(custom = [], tab = "recent") {
@@ -530,5 +635,5 @@ const Render = (() => {
       .join("");
   }
 
-  return { chat, journalList, journal, journalEditor, journalExport, homeTabs, calendar, searchPanel, searchResults, moodView, journalDay, range, stylePicker, themeGrid, stickerPanel, dayLabel };
+  return { chat, journalList, journal, journalEditor, stickerLayout, sectionFor, journalExport, homeTabs, calendar, searchPanel, searchResults, moodView, journalDay, range, stylePicker, themeGrid, stickerPanel, dayLabel };
 })();

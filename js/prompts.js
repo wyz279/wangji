@@ -45,6 +45,28 @@ const STYLES = {
 };
 
 const STYLE_KEYS = Object.keys(STYLES);
+
+// 照片版型：AI 依照片前後的訊息推測內容和重要程度來挑；程式再依張數校正
+const LAYOUTS = { hero: "大圖橫幅", side: "側邊圖", polaroid: "拍立得", pair: "兩張並排", collage: "拼貼" };
+function layoutsFor(count) {
+  if (count <= 0) return [];
+  if (count === 1) return ["side", "polaroid", "hero"];
+  if (count === 2) return ["pair", "side"];
+  return ["collage", "side"];
+}
+function normalizeLayout(layout, count) {
+  const ok = layoutsFor(count);
+  if (!ok.length) return "none";
+  return ok.includes(layout) ? layout : ok[0];
+}
+
+const PHOTO_RULES = `- 每段都要有 layout（照片版型），沒有照片的段落填 "none"。先依照片前後的訊息推測照片拍的是什麼，再依張數挑：
+  - 一張：今天的重點、風景、旅行、活動 → "hero"（大圖橫幅）；一般照片 → "side"（側邊圖）；隨手拍的小東西（食物、飲料、小物）→ "polaroid"（拍立得）
+  - 兩張 → "pair"（兩張並排）
+  - 三張以上 → "collage"（拼貼）
+- photo_notes：每張照片一句你推測的內容（10 個字左右），只能用前後訊息出現過的線索，例如「早午餐的厚鬆餅」；這只給使用者編輯時參考，絕對不要寫進正文。`;
+
+const PHOTO_JSON = `"photo_notes": {"img_...": "早午餐的厚鬆餅"}`;
 const MEMO_SECTIONS = ["發生的事", "心情", "待辦／想買"];
 
 // narration：允許加風格規定的旁白／解讀句（末日的「算了。」、樂觀的正向解讀），但仍不能新增事件
@@ -76,10 +98,11 @@ ${COMMON_RULES}
 ${PROSE_RULES}
 - 每一則訊息的 id（包含照片）都必須恰好出現在某一段的 message_ids 裡，不可遺漏、不可重複、不可編造。
 - 每一段至少要包含一則文字訊息。
+${PHOTO_RULES}
 
 【輸出格式】
 只輸出 JSON，不要任何其他文字：
-{"title": "...", ${MOOD_JSON}, "sections": [{"time_range": "HH:mm-HH:mm", "message_ids": ["msg_...", "img_..."]}]}`;
+{"title": "...", ${MOOD_JSON}, ${PHOTO_JSON}, "sections": [{"time_range": "HH:mm-HH:mm", "layout": "side", "message_ids": ["msg_...", "img_..."]}]}`;
   }
 
   if (styleKey === "memo") {
@@ -120,8 +143,9 @@ ${COMMON_RULES.replace(noInvent(), noInvent(style))}
 ${PROSE_RULES}
 - ${style.keepVoice === false ? "" : "保留使用者的口吻和情緒，"}禁止官方腔、禁止文藝腔和堆砌比喻，禁止「今天是充實的一天」這類空泛總結。
 - 每個照片 id 必須恰好出現在一個段落的 matched_images 裡，放在時間最接近的段落；不可編造不存在的 id。沒有照片的段落填 []。
+${PHOTO_RULES}
 
 【輸出格式】
 只輸出 JSON，不要任何其他文字：
-{"title": "...", ${MOOD_JSON}, "sections": [{"time_range": "HH:mm-HH:mm", "refined_text": "...", "matched_images": ["img_..."]}]}`;
+{"title": "...", ${MOOD_JSON}, ${PHOTO_JSON}, "sections": [{"time_range": "HH:mm-HH:mm", "layout": "side", "refined_text": "...", "matched_images": ["img_..."]}]}`;
 }
