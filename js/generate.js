@@ -4,6 +4,53 @@ const Gen = (() => {
   const MODEL = "qwen/qwen3.8-27b";
   const MAX_TRIES = 3;
 
+  /* ---------- AI 品質紀錄 ----------
+     每次呼叫 AI 記一筆：做什麼、試了幾次、每次被擋下的原因、成功或失敗、花幾秒。
+     不記日記內容，只記數字和原因；交給 app.js 設定的 logger 存起來。 */
+  let logger = null;
+  const setLogger = (fn) => (logger = fn);
+
+  // 把驗證錯誤歸類，方便統計
+  function categorize(msg) {
+    if (/JSON/.test(msg)) return "JSON 格式錯誤";
+    if (/太長/.test(msg)) return "寫太長";
+    if (/簡體/.test(msg)) return "出現簡體字";
+    if (/照片/.test(msg)) return "照片 id 錯誤";
+    if (/條列|分類|section_title/.test(msg)) return "備忘格式錯誤";
+    if (/message_ids|漏掉|文字訊息|不存在的 id|重複出現/.test(msg)) return "原始風格分段錯誤";
+    if (/心情/.test(msg)) return "心情格式錯誤";
+    if (/缺少|必須是/.test(msg)) return "缺少欄位";
+    return "其他";
+  }
+  function failCategory(e) {
+    const m = e?.message || "";
+    if (/API Key/.test(m)) return "API Key 無效";
+    if (/額度/.test(m)) return "額度用完";
+    if (/連不上/.test(m)) return "網路問題";
+    if (/連續|沒有給出/.test(m)) return "重試後仍不合格";
+    return "其他錯誤";
+  }
+  const startTrack = (kind, style, count) => ({ kind, style, count, tries: 0, reasons: [], start: Date.now() });
+  function finishTrack(tr, ok, err) {
+    if (!logger) return;
+    try {
+      logger({
+        t: new Date().toISOString(),
+        kind: tr.kind,
+        style: tr.style || "",
+        count: tr.count,
+        tries: tr.tries,
+        reasons: tr.reasons.map(categorize),
+        ok,
+        fail: ok ? "" : failCategory(err),
+        ms: Date.now() - tr.start,
+        model: MODEL,
+      });
+    } catch (e) {
+      console.warn("[忘紀] 品質紀錄寫入失敗：", e);
+    }
+  }
+
   const pad = (n) => String(n).padStart(2, "0");
   function stamp(iso) {
     const d = new Date(iso);
@@ -165,14 +212,28 @@ const Gen = (() => {
       },
       { role: "user", content: formatTimeline(msgs, false, true) },
     ];
+    const tr = startTrack("mood", "", msgs.length);
     for (let attempt = 1; attempt <= 2; attempt++) {
+      tr.tries = attempt;
+      let raw;
       try {
-        const mood = validMood(parseJSON(await callGroq(key, conversation)));
-        if (mood) return mood;
+        raw = await callGroq(key, conversation);
       } catch (e) {
-        if (/API Key|額度|連不上/.test(e.message)) throw e;
+        finishTrack(tr, false, e);
+        throw e;
+      }
+      try {
+        const mood = validMood(parseJSON(raw));
+        if (mood) {
+          finishTrack(tr, true);
+          return mood;
+        }
+        tr.reasons.push("心情格式不對");
+      } catch {
+        tr.reasons.push("輸出不是合法的 JSON");
       }
     }
+    finishTrack(tr, false, new Error("兩次都沒有給出可用的心情"));
     return null;
   }
 
@@ -186,6 +247,78 @@ const Gen = (() => {
       });
     }
     obj.photo_notes = notes;
+  }
+
+  // 月回顧：讀一個月的手札摘要，寫回顧。lines：每篇一行摘要；dates：這個月有手札的日期（YYYY-MM-DD）
+  async function generateReview(lines, dates, monthLabel, key) {
+    const tr = startTrack("review", "", lines.length);
+    try {
+      const out = await runReview(lines, dates, monthLabel, key, tr);
+      finishTrack(tr, true);
+      return out;
+    } catch (e) {
+      finishTrack(tr, false, e);
+      throw e;
+    }
+  }
+
+  async function runReview(lines, dates, monthLabel, key, tr) {
+    const conversation = [
+      {
+        role: "system",
+        content: `你會讀到一個人 ${monthLabel} 每天的手札摘要，每篇開頭是 [日期 YYYY-MM-DD｜心情]。請用他自己的口吻（第一人稱「我」）寫這個月的回顧，只輸出 JSON：
+{"title": "一句話總結這個月，20 字以內", "summary": "2～3 段白話回顧，段落之間用 \\n 分隔", "happy": [{"date": "YYYY-MM-DD", "text": "開心的事"}], "annoying": [{"date": "YYYY-MM-DD", "text": "煩惱的事"}], "best_day": {"date": "YYYY-MM-DD", "reason": "為什麼"}, "worst_day": {"date": "YYYY-MM-DD", "reason": "為什麼"}}
+規則：
+- 只根據手札內容，不可新增沒寫過的事。
+- happy、annoying 各最多 3 件，可以少於 3 件，沒有就給空陣列；同一件事不要重複。
+- date 一定要是輸入裡出現過的日期。
+- 口語、白話，像本人在回想這個月；不要文藝腔、不要比喻堆砌、不要雞湯、不要說教。
+- 一律使用繁體中文。`,
+      },
+      { role: "user", content: lines.join("\n") },
+    ];
+    const inputText = lines.join("");
+    let last = "";
+    for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
+      tr.tries = attempt;
+      const raw = await callGroq(key, conversation);
+      let r = null;
+      const errors = [];
+      try {
+        r = parseJSON(raw);
+      } catch {
+        errors.push("輸出不是合法的 JSON");
+      }
+      if (r) {
+        if (!isText(r.title)) errors.push("缺少 title");
+        if (!isText(r.summary)) errors.push("缺少 summary");
+        const simp = findSimplified(`${r.title || ""}${r.summary || ""}`, inputText);
+        if (simp.length) errors.push(`出現簡體字「${simp.join("、")}」，請改成繁體中文`);
+      }
+      if (!errors.length) {
+        const items = (arr) =>
+          (Array.isArray(arr) ? arr : [])
+            .filter((x) => x && dates.includes(x.date) && isText(x.text))
+            .slice(0, 3)
+            .map((x) => ({ date: x.date, text: x.text.trim() }));
+        const day = (d) => (d && dates.includes(d.date) && isText(d.reason) ? { date: d.date, reason: d.reason.trim() } : null);
+        return {
+          title: r.title.trim(),
+          summary: r.summary.trim(),
+          happy: items(r.happy),
+          annoying: items(r.annoying),
+          best_day: day(r.best_day),
+          worst_day: day(r.worst_day),
+        };
+      }
+      last = errors[0];
+      tr.reasons.push(...errors);
+      conversation.push(
+        { role: "assistant", content: raw },
+        { role: "user", content: `上一次的輸出有以下問題，請修正後重新輸出完整的 JSON：\n- ${errors.join("\n- ")}` }
+      );
+    }
+    throw new Error(`AI 連續 ${MAX_TRIES} 次輸出不合格（${last}）`);
   }
 
   async function callGroq(key, messages) {
@@ -231,7 +364,20 @@ const Gen = (() => {
   }
 
   // msgs：要整理的訊息（已依時間排序）。onTry(n)：第 n 次嘗試時呼叫，用來更新按鈕文字
-  async function generateJournal(msgs, styleKey, key, onTry = () => {}) {
+  // meta.kind："journal"（一鍵整理）或 "rewrite"（換風格／重寫），給品質紀錄用
+  async function generateJournal(msgs, styleKey, key, onTry = () => {}, meta = {}) {
+    const tr = startTrack(meta.kind || "journal", styleKey, msgs.length);
+    try {
+      const out = await runJournal(msgs, styleKey, key, onTry, tr);
+      finishTrack(tr, true);
+      return out;
+    } catch (e) {
+      finishTrack(tr, false, e);
+      throw e;
+    }
+  }
+
+  async function runJournal(msgs, styleKey, key, onTry, tr) {
     const isMemo = styleKey === "memo";
     const imageIds = isMemo ? [] : msgs.filter((m) => m.type === "image").map((m) => m.id);
     const inputText = msgs.filter((m) => m.type === "text").map((m) => m.content).join("");
@@ -243,6 +389,7 @@ const Gen = (() => {
     let lastErrors = [];
     for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
       onTry(attempt);
+      tr.tries = attempt;
       const raw = await callGroq(key, conversation);
 
       let obj = null;
@@ -262,6 +409,7 @@ const Gen = (() => {
       }
 
       lastErrors = result.errors;
+      tr.reasons.push(...lastErrors);
       console.warn(`[忘紀] 第 ${attempt} 次輸出不合格：`, lastErrors);
       conversation.push(
         { role: "assistant", content: raw },
@@ -271,5 +419,5 @@ const Gen = (() => {
     throw new Error(`AI 連續 ${MAX_TRIES} 次輸出不合格（${lastErrors[0]}）`);
   }
 
-  return { generateJournal, generateMood, validMood, testKey, formatTimeline, validate, placeMissing, convertRaw };
+  return { generateJournal, generateMood, generateReview, setLogger, validMood, testKey, formatTimeline, validate, placeMissing, convertRaw };
 })();

@@ -21,7 +21,11 @@ let genLabel = ""; // 整理中按鈕上的進度文字
 let rewriting = false;
 let currentJournalId = null; // 目前正在閱讀的手札
 const chatUI = { selectedId: null, editingId: null };
-let customStickers = []; // 自己上傳的貼圖庫 [{ id, label, blob }] // 聊天室裡選取／編輯中的訊息
+let customStickers = []; // 自己上傳的貼圖庫 [{ id, label, blob }]
+let reviews = {}; // 月回顧 { "2026-11": { created_at, journal_count, result } }
+let reviewBusy = false;
+let aiLog = []; // AI 品質紀錄（只保留最近 AI_LOG_MAX 筆）
+const AI_LOG_MAX = 500; // 聊天室裡選取／編輯中的訊息
 
 /* ---------- 小工具 ---------- */
 function localISO(d = new Date()) {
@@ -425,7 +429,7 @@ function renderHome() {
       ? Render.calendar(journals, home.y, home.m, home.picked)
       : home.tab === "list"
         ? Render.searchPanel(journals, msgMap, home.query)
-        : Render.moodView(journals, home.y, home.m);
+        : Render.moodView(journals, home.y, home.m, reviews[monthKey()], reviewBusy);
   $("#journalList").innerHTML = Render.homeTabs(home.tab) + `<div class="home-panel">${panel}</div>`;
 }
 
@@ -447,10 +451,13 @@ function onHomeClick(e) {
   if (day) {
     const list = journals.filter((j) => Render.journalDay(j) === day.dataset.day);
     if (list.length === 1) return showJournal(list[0].id);
-    home.picked = day.dataset.day;
+    // 好幾篇（或從回顧點進來）→ 切到月曆，列出那天的手札
+    const [yy, mm] = day.dataset.day.split("-").map(Number);
+    Object.assign(home, { tab: "calendar", y: yy, m: mm - 1, picked: day.dataset.day });
     return renderHome();
   }
   if (e.target.closest("#btnFillMood")) return fillMoods();
+  if (e.target.closest("#btnReview")) return generateMonthReview();
   const card = e.target.closest(".journal-card");
   if (card) showJournal(card.dataset.id);
 }
@@ -485,6 +492,153 @@ async function fillMoods() {
   }
   if (home.tab === "mood" && !$("#journalList").hidden) renderHome();
   toast(`已補上 ${done} 篇的心情`);
+}
+
+/* ---------- AI 品質紀錄 ---------- */
+// generate.js 每呼叫一次 AI 就交來一筆（只有次數、原因、秒數，沒有日記內容）
+Gen.setLogger((entry) => {
+  aiLog.push(entry);
+  if (aiLog.length > AI_LOG_MAX) aiLog = aiLog.slice(-AI_LOG_MAX);
+  DB.setMeta("aiLog", aiLog).catch(() => {});
+});
+
+function openAiLog() {
+  $("#logBody").innerHTML = Render.aiLogView(aiLog);
+  ask($("#logDlg"));
+}
+
+function exportAiLogCSV() {
+  if (!aiLog.length) return toast("還沒有紀錄");
+  const KIND = { journal: "一鍵整理", rewrite: "換風格／重寫", mood: "補心情", review: "月回顧" };
+  const head = ["時間", "類型", "風格", "訊息數", "嘗試次數", "被擋下的原因", "結果", "失敗原因", "秒數", "模型"];
+  const rows = aiLog.map((e) => [
+    localISO(new Date(e.t)),
+    KIND[e.kind] || e.kind,
+    STYLES[e.style]?.name || e.style,
+    e.count,
+    e.tries,
+    e.reasons.join("、"),
+    e.ok ? "成功" : "失敗",
+    e.fail,
+    (e.ms / 1000).toFixed(1),
+    e.model,
+  ]);
+  const csv = [head, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  // 開頭加 BOM，Excel 打開中文才不會變亂碼
+  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `忘紀_AI品質紀錄_${localISO().slice(0, 10)}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/* ---------- 月回顧 ---------- */
+const monthKey = () => `${home.y}-${String(home.m + 1).padStart(2, "0")}`;
+
+async function generateMonthReview() {
+  const key = localStorage.getItem(KEY_STORAGE);
+  if (!key) return toast("先到設定貼上 Groq API Key 喔");
+  const mk = monthKey();
+  const list = journals
+    .filter((j) => Render.journalDay(j).startsWith(mk))
+    .sort((a, b) => Date.parse(a.range[0]) - Date.parse(b.range[0]));
+  if (!list.length) return;
+  // 每篇一行摘要：優先用「順稿」版本（最接近原意），每篇最多 400 字，避免送太多
+  const lines = list.map((j) => {
+    const v = j.versions.daily || j.versions.raw || j.result;
+    const text = v.sections.map((s) => s.refined_text).join(" ").replace(/\s+/g, " ").slice(0, 400);
+    const mood = j.mood ? `${j.mood.emoji} ${j.mood.label} ${j.mood.score}分` : "沒有心情資料";
+    return `[${Render.journalDay(j)}｜${mood}] ${j.result.title}：${text}`;
+  });
+  const dates = [...new Set(list.map((j) => Render.journalDay(j)))];
+  reviewBusy = true;
+  renderHome();
+  try {
+    const result = await Gen.generateReview(lines, dates, `${home.y} 年 ${home.m + 1} 月`, key);
+    reviews[mk] = { created_at: localISO(), journal_count: list.length, result };
+    await DB.setMeta("reviews", reviews);
+    Sync.review(mk, reviews[mk]);
+    toast(`${home.m + 1} 月回顧完成`);
+  } catch (e) {
+    console.error("[忘紀] 月回顧失敗：", e);
+    toast(`月回顧失敗：${e.message}`);
+  }
+  reviewBusy = false;
+  if (home.tab === "mood" && !$("#journalList").hidden) renderHome();
+}
+
+/* ---------- 備份匯出／匯入 ---------- */
+// 圖片（Blob）存成文字（data URL）才能放進 JSON；還原時再轉回來
+const blobToDataURL = (blob) =>
+  new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+const dataURLToBlob = async (url) => (await fetch(url)).blob();
+
+async function exportBackup() {
+  toast("備份打包中…");
+  const pack = async (m) => (m.blob ? { ...m, blob: await blobToDataURL(m.blob) } : m);
+  const chatBg = await DB.getMeta("chatBg").catch(() => null);
+  const data = {
+    app: "wangji",
+    version: 1,
+    exported_at: localISO(),
+    messages: await Promise.all(messages.map(pack)),
+    journals,
+    custom_stickers: await Promise.all(customStickers.map(pack)),
+    reviews,
+    chat_bg: chatBg ? await blobToDataURL(chatBg) : null,
+    // 不放 API Key：備份檔可能會傳給別人或放在雲端
+  };
+  const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `忘紀備份_${localISO().slice(0, 10)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast(`已匯出備份（${messages.length} 則紀錄、${journals.length} 篇手札）`);
+}
+
+async function importBackup(file) {
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch {
+    return toast("這個檔案不是忘紀的備份檔");
+  }
+  if (data?.app !== "wangji" || !Array.isArray(data.messages) || !Array.isArray(data.journals)) return toast("這個檔案不是忘紀的備份檔");
+  const ok = confirm(
+    `要從備份還原嗎？\n\n會加入 ${data.messages.length} 則紀錄、${data.journals.length} 篇手札。` +
+      `現有的資料會保留；同一筆資料以備份的版本為準。`
+  );
+  if (!ok) return;
+  try {
+    const unpack = async (m) => (typeof m.blob === "string" ? { ...m, blob: await dataURLToBlob(m.blob) } : m);
+    const msgs = await Promise.all(data.messages.map(unpack));
+    msgs.forEach((m) => m.journal_id === "processing" && (m.journal_id = null));
+    await DB.putMany("messages", msgs);
+    await DB.putMany("journals", data.journals);
+    const packs = await Promise.all((data.custom_stickers || []).map(unpack));
+    const ids = new Set(packs.map((c) => c.id));
+    customStickers = [...customStickers.filter((c) => !ids.has(c.id)), ...packs];
+    await DB.setMeta("customStickers", customStickers);
+    reviews = { ...reviews, ...(data.reviews || {}) };
+    await DB.setMeta("reviews", reviews);
+    if (data.chat_bg && !(await DB.getMeta("chatBg").catch(() => null))) await DB.setMeta("chatBg", await dataURLToBlob(data.chat_bg));
+    // 重新讀一次，連結了本機資料夾就順便同步，再重新整理頁面
+    messages = await DB.getAll("messages");
+    journals = await DB.getAll("journals");
+    await Sync.all(messages, journals);
+    toast("還原完成，重新載入中…");
+    setTimeout(() => location.reload(), 800);
+  } catch (e) {
+    console.error("[忘紀] 還原失敗：", e);
+    toast(`還原失敗：${e.message}`);
+  }
 }
 
 /* ---------- 匯出圖片 ---------- */
@@ -708,7 +862,7 @@ async function switchStyle(j, style, force = false) {
   $("#readerSections").classList.add("rewriting");
   toast(`用「${STYLES[style].name}」重寫中…`);
   try {
-    const { result } = await Gen.generateJournal(msgs, style, key);
+    const { result } = await Gen.generateJournal(msgs, style, key, undefined, { kind: "rewrite" });
     j.versions[style] = result;
     if (!j.mood) j.mood = Gen.validMood(result.mood);
     j.style = style;
@@ -836,6 +990,17 @@ async function openSettings() {
     toast("已移除聊天室背景");
   };
 
+  $("#btnExportBackup").onclick = () => exportBackup();
+  $("#btnAiLog").onclick = () => {
+    $("#settingsDlg").close("cancel");
+    openAiLog();
+  };
+  $("#backupInput").onchange = (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (file) importBackup(file);
+  };
+
   $("#btnSample").onclick = async () => {
     if (messages.some((m) => m.sample)) return (status.textContent = "測試資料已經載入過了，要重來請先清除所有紀錄");
     const sample = await buildSampleMessages();
@@ -894,6 +1059,13 @@ function bind() {
   $("#btnLogo").addEventListener("click", () => showView("chat")); // 點左上角「忘紀」回聊天室
   $("#btnSettings").addEventListener("click", openSettings);
   $("#btnTheme").addEventListener("click", openThemePicker);
+  $("#btnLogCSV").addEventListener("click", exportAiLogCSV);
+  $("#btnLogClear").addEventListener("click", async () => {
+    if (!confirm("確定要清除所有 AI 品質紀錄嗎？")) return;
+    aiLog = [];
+    await DB.setMeta("aiLog", aiLog);
+    $("#logBody").innerHTML = Render.aiLogView(aiLog);
+  });
   $("#chatList").addEventListener("click", onChatClick);
   $("#chatList").addEventListener("keydown", (e) => {
     if (e.target.id !== "editInput") return;
@@ -931,6 +1103,8 @@ async function init() {
     toast("瀏覽器資料庫無法使用，請改用 Live Server 開啟");
   }
   customStickers = (await DB.getMeta("customStickers").catch(() => null)) || [];
+  reviews = (await DB.getMeta("reviews").catch(() => null)) || {};
+  aiLog = (await DB.getMeta("aiLog").catch(() => null)) || [];
   applyChatBg((await DB.getMeta("chatBg").catch(() => null)) || null);
   await Sync.init().catch((e) => console.warn("[忘紀] 資料夾連結讀取失敗：", e));
   const st = Sync.status();

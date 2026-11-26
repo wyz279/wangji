@@ -143,6 +143,19 @@ const Sync = (() => {
       await jDir.removeEntry(`${name}.md`).catch(() => {});
     });
 
+  // 月回顧：reviews/YYYY-MM.md
+  const review = (key, rv) =>
+    safe(async () => {
+      const rDir = await dir(root, "reviews");
+      const r = rv.result;
+      const items = (arr) => (arr.length ? arr.map((x) => `- ${x.date}：${x.text}`).join("\n") : "- （沒有特別提到）");
+      const lines = [`# ${key} 月回顧`, "", `> ${r.title}`, "", r.summary, "", "## 開心的事", "", items(r.happy), "", "## 煩惱的事", "", items(r.annoying), ""];
+      if (r.best_day) lines.push(`最棒的一天：${r.best_day.date}，${r.best_day.reason}`, "");
+      if (r.worst_day) lines.push(`最慘的一天：${r.worst_day.date}，${r.worst_day.reason}`, "");
+      lines.push(`（根據 ${rv.journal_count} 篇手札產生，${rv.created_at}）`);
+      await writeFile(rDir, `${key}.md`, lines.join("\n"));
+    });
+
   // 一次刪除很多則訊息（刪除手札時）：受影響的日子各重寫一次 raw，照片和自訂貼圖檔一起刪
   const removedMany = (list, allMessages) =>
     safe(async () => {
@@ -177,5 +190,5 @@ const Sync = (() => {
     return ok && !warned;
   }
 
-  return { init, link, reconnect, status, message, journal, journalRemoved, removed, removedMany, all };
+  return { init, link, reconnect, status, message, journal, journalRemoved, removed, removedMany, review, all };
 })();

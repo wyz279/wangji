@@ -138,7 +138,7 @@ const Render = (() => {
     const tabs = [
       ["calendar", "📅 月曆"],
       ["list", "📋 列表"],
-      ["mood", "📊 心情"],
+      ["mood", "📊 心情與回顧"],
     ];
     return `<div class="home-tabs">${tabs
       .map(([k, n]) => `<button class="home-tab${k === tab ? " active" : ""}" data-tab="${k}">${n}</button>`)
@@ -208,12 +208,38 @@ const Render = (() => {
 
   // 心情：這個月每天的心情分數長條圖＋常出現的心情
   const SCORE_WORD = ["", "很糟", "不太好", "普通", "不錯", "超好"];
-  function moodView(journals, y, m) {
+  // 月回顧卡片。review：存好的回顧（沒有就是 undefined）；busy：正在產生
+  function reviewCard(review, monthJournals, m, busy) {
+    const dayBtn = (d) => {
+      const [, mm, dd] = d.split("-").map(Number);
+      return `<button class="review-day" data-day="${d}">${mm}/${dd}</button>`;
+    };
+    const list = (arr) => (arr.length ? `<ul>${arr.map((x) => `<li>${dayBtn(x.date)}${esc(x.text)}</li>`).join("")}</ul>` : `<p class="hint">沒有特別提到</p>`);
+    const btnText = busy ? "⏳ 回顧產生中…" : review ? "↻ 重新產生" : "✨ 產生回顧";
+    const head = `<div class="review-head"><h3>🗓️ ${m + 1} 月回顧</h3><button id="btnReview" class="ghost"${busy ? " disabled" : ""}>${btnText}</button></div>`;
+    if (!review) return `<div class="review-card">${head}<p class="hint">讓 AI 讀這個月的 ${monthJournals.length} 篇手札，用你的口吻寫一篇月回顧。</p></div>`;
+    const r = review.result;
+    const more = monthJournals.length - review.journal_count;
+    const day = (label, d) => (d ? `<p class="review-best">${label}：${dayBtn(d.date)}${esc(d.reason)}</p>` : "");
+    return `<div class="review-card">${head}
+      <p class="review-title">${esc(r.title)}</p>
+      ${r.summary.split("\n").filter((t) => t.trim()).map((t) => `<p>${esc(t)}</p>`).join("")}
+      <div class="review-cols">
+        <div><h4>😆 開心的事</h4>${list(r.happy)}</div>
+        <div><h4>😩 煩惱的事</h4>${list(r.annoying)}</div>
+      </div>
+      ${day("最棒的一天", r.best_day)}${day("最慘的一天", r.worst_day)}
+      <p class="hint">根據 ${review.journal_count} 篇手札產生${more > 0 ? `・這個月又多了 ${more} 篇，可以重新產生` : ""}・點日期可以打開那天的手札</p>
+    </div>`;
+  }
+
+  function moodView(journals, y, m, review, busy = false) {
     const days = byDay(journals);
     const total = new Date(y, m + 1, 0).getDate();
     const prefix = `${y}-${pad(m + 1)}`;
     const monthJournals = journals.filter((j) => journalDay(j).startsWith(prefix));
     if (!monthJournals.length) return `${monthNav(y, m)}<p class="empty-hint">這個月還沒有手札</p>`;
+    const card = reviewCard(review, monthJournals, m, busy);
 
     const points = [];
     for (let d = 1; d <= total; d++) {
@@ -225,7 +251,7 @@ const Render = (() => {
     }
     const missing = monthJournals.filter((j) => !j.mood).length;
     const fill = missing ? `<button id="btnFillMood" class="ghost fill-mood">幫這個月 ${missing} 篇還沒有心情的手札補上心情</button>` : "";
-    if (!points.length) return `${monthNav(y, m)}<p class="empty-hint">這個月的手札還沒有心情資料</p>${fill}`;
+    if (!points.length) return `${monthNav(y, m)}${card}<p class="empty-hint">這個月的手札還沒有心情資料</p>${fill}`;
 
     const avg = points.reduce((n, p) => n + p.score, 0) / points.length;
     const recorded = new Set(monthJournals.map(journalDay)).size;
@@ -271,6 +297,7 @@ const Render = (() => {
       .join("");
 
     return `${monthNav(y, m)}
+      ${card}
       <div class="mood-stats">
         <div class="mood-hero"><b>${avg.toFixed(1)}</b><span>平均心情・${SCORE_WORD[Math.round(avg)]}</span></div>
         <div class="mood-hero"><b>${recorded}</b><span>天有手札</span></div>
@@ -623,6 +650,60 @@ const Render = (() => {
     return `<div class="stk-tabs">${tabs}</div><div class="stk-grid">${grid}</div>`;
   }
 
+  // AI 品質紀錄的統計畫面
+  function aiLogView(log) {
+    if (!log.length) return `<p class="hint">還沒有紀錄。之後每次整理、重寫、補心情、產生月回顧都會記一筆（只記次數、原因和秒數，不記日記內容）。</p>`;
+    const KIND = { journal: "一鍵整理", rewrite: "換風格／重寫", mood: "補心情", review: "月回顧" };
+    const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : "—");
+    const ok = log.filter((e) => e.ok);
+    const first = ok.filter((e) => e.tries === 1).length;
+    const avgTries = ok.length ? (ok.reduce((n, e) => n + e.tries, 0) / ok.length).toFixed(1) : "—";
+    const avgSec = log.length ? (log.reduce((n, e) => n + e.ms, 0) / log.length / 1000).toFixed(1) : "—";
+
+    const count = (arr) => {
+      const m = new Map();
+      arr.forEach((k) => m.set(k, (m.get(k) || 0) + 1));
+      return [...m.entries()].sort((a, b) => b[1] - a[1]);
+    };
+    const reasons = count(log.flatMap((e) => e.reasons));
+    const fails = count(log.filter((e) => !e.ok).map((e) => e.fail));
+
+    const styleRows = [...new Set(log.filter((e) => e.style).map((e) => e.style))]
+      .map((k) => {
+        const list = log.filter((e) => e.style === k);
+        const good = list.filter((e) => e.ok);
+        return `<tr><td>${STYLES[k]?.name || esc(k)}</td><td>${list.length}</td><td>${pct(good.filter((e) => e.tries === 1).length, list.length)}</td>
+          <td>${good.length ? (good.reduce((n, e) => n + e.tries, 0) / good.length).toFixed(1) : "—"}</td></tr>`;
+      })
+      .join("");
+
+    const recent = log
+      .slice(-15)
+      .reverse()
+      .map((e) => {
+        const d = new Date(e.t);
+        return `<tr><td>${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}</td><td>${KIND[e.kind] || e.kind}</td>
+          <td>${STYLES[e.style]?.name || ""}</td><td>${e.tries}</td>
+          <td>${e.ok ? (e.reasons.length ? `成功（擋下：${esc(e.reasons.join("、"))}）` : "成功") : `<span class="log-fail">失敗：${esc(e.fail)}</span>`}</td>
+          <td>${(e.ms / 1000).toFixed(1)}</td></tr>`;
+      })
+      .join("");
+
+    const list = (arr) => (arr.length ? arr.map(([k, n]) => `<span class="mood-tag">${esc(k)}<b>×${n}</b></span>`).join("") : `<span class="hint">沒有</span>`);
+    return `<div class="log-stats">
+        <div class="mood-hero"><b>${log.length}</b><span>呼叫 AI 次數</span></div>
+        <div class="mood-hero"><b>${pct(first, log.length)}</b><span>第一次就通過</span></div>
+        <div class="mood-hero"><b>${avgTries}</b><span>成功時平均嘗試次數</span></div>
+        <div class="mood-hero"><b>${avgSec}</b><span>平均秒數</span></div>
+      </div>
+      <h3 class="day-head">被驗證擋下的原因（之後自動重試）</h3><div class="mood-tags">${list(reasons)}</div>
+      <h3 class="day-head">最後失敗的原因</h3><div class="mood-tags">${list(fails)}</div>
+      ${styleRows ? `<h3 class="day-head">各風格</h3><table class="log-table"><tr><th>風格</th><th>次數</th><th>第一次就通過</th><th>平均嘗試</th></tr>${styleRows}</table>` : ""}
+      <h3 class="day-head">最近 15 筆</h3>
+      <table class="log-table"><tr><th>時間</th><th>類型</th><th>風格</th><th>次數</th><th>結果</th><th>秒</th></tr>${recent}</table>
+      <p class="hint">只保留最近 500 筆；只記次數、原因和秒數，不記日記內容。</p>`;
+  }
+
   // 主題選單：每個選項附一條色票
   function themeGrid(themes, current) {
     return Object.entries(themes)
@@ -635,5 +716,5 @@ const Render = (() => {
       .join("");
   }
 
-  return { chat, journalList, journal, journalEditor, stickerLayout, sectionFor, journalExport, homeTabs, calendar, searchPanel, searchResults, moodView, journalDay, range, stylePicker, themeGrid, stickerPanel, dayLabel };
+  return { chat, journalList, journal, journalEditor, stickerLayout, sectionFor, journalExport, aiLogView, homeTabs, calendar, searchPanel, searchResults, moodView, journalDay, range, stylePicker, themeGrid, stickerPanel, dayLabel };
 })();

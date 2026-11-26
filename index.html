@@ -71,6 +71,11 @@
     <label class="file-btn ghost">選擇圖片<input id="bgInput" type="file" accept="image/*" hidden></label>
     <button type="button" id="btnBgRemove" class="ghost">移除背景</button>
   </div>
+  <div class="dev-tools">
+    <p class="hint">備份（包含所有紀錄、照片、貼圖、手札和回顧；不包含 API Key）</p>
+    <button type="button" id="btnExportBackup" class="ghost">匯出備份</button>
+    <label class="file-btn ghost">從備份還原<input id="backupInput" type="file" accept=".json,application/json" hidden></label>
+  </div>
   <div id="folderSync" class="dev-tools">
     <p class="hint">本機資料夾（自動把原始紀錄存到 raw/、整理後的手札存到 journals/）</p>
     <p id="folderStatus" class="hint"></p>
@@ -81,11 +86,23 @@
     <p class="hint">測試工具</p>
     <button type="button" id="btnSample" class="ghost">載入測試資料（3 天份）</button>
     <button type="button" id="btnClearAll" class="ghost danger">清除所有紀錄與手札</button>
+    <button type="button" id="btnAiLog" class="ghost">AI 品質紀錄</button>
   </div>
   <div class="dlg-actions">
     <button type="button" id="btnTestKey" class="ghost">測試連線</button>
     <button value="cancel" class="ghost">取消</button>
     <button value="save" class="primary">儲存</button>
+  </div>
+</dialog>
+
+<!-- AI 品質紀錄 -->
+<dialog id="logDlg" class="log-dlg">
+  <h2>AI 品質紀錄</h2>
+  <div id="logBody"></div>
+  <div class="dlg-actions">
+    <button type="button" id="btnLogClear" class="ghost danger">清除紀錄</button>
+    <button type="button" id="btnLogCSV" class="ghost">匯出 CSV</button>
+    <button value="close" class="primary">關閉</button>
   </div>
 </dialog>
 

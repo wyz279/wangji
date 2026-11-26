@@ -426,6 +426,37 @@ mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: in
 .mood-tag b { margin-left: 6px; color: var(--muted); font-weight: normal; }
 .fill-mood { border-radius: 8px; padding: 8px 14px; align-self: flex-start; }
 
+/* AI 品質紀錄 */
+dialog.log-dlg { width: min(94vw, 720px); max-height: 88vh; }
+.log-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 6px; }
+.log-stats .mood-hero b { font-size: 1.5rem; }
+.log-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-bottom: 8px; }
+.log-table th, .log-table td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.log-table th { color: var(--muted); font-weight: 600; }
+.log-fail { color: #c0392b; }
+
+/* 月回顧 */
+.review-card { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; font-family: var(--font-journal); }
+.review-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.review-head h3 { margin: 0; font-size: 1.1rem; }
+.review-head button { border-radius: 8px; padding: 4px 12px; font-family: system-ui, sans-serif; font-size: 0.85rem; }
+.review-title { font-size: 1.15rem; margin: 12px 0 6px; }
+.review-card > p:not(.hint):not(.review-title) { line-height: 1.9; margin: 0 0 8px; white-space: pre-wrap; }
+.review-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 10px 0; }
+.review-cols h4 { margin: 0 0 4px; font-size: 0.95rem; }
+.review-cols ul { margin: 0; padding-left: 1.1em; line-height: 1.8; }
+.review-day {
+  border: 1px solid var(--line);
+  background: var(--bubble);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0 8px;
+  margin-right: 6px;
+  font-size: 0.78rem;
+  font-family: system-ui, sans-serif;
+}
+.review-best { margin: 4px 0; }
+
 /* 匯出圖片：畫面外排版，給 html2canvas 截圖 */
 .export-holder { position: absolute; left: -10000px; top: 0; width: 760px; }
 .export-page { background: var(--bg); color: var(--ink); overflow: visible; padding: 36px 32px 28px; }
@@ -611,6 +642,7 @@ mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: in
 
 @media (max-width: 600px) {
   .cmp-row { grid-template-columns: 1fr; gap: 8px; }
+  .review-cols { grid-template-columns: 1fr; }
   .cmp-head { display: none; }
   .cmp-new { border-left: 3px solid var(--accent); padding-left: 10px; }
   .page-sticker { font-size: 44px; }
