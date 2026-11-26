@@ -224,6 +224,12 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   text-align: center;
 }
 .icon-btn.plain { border: none; background: transparent; }
+#btnVoice.recording { background: #e74c3c; color: #fff; border-radius: 50%; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(231, 76, 60, 0.25); } }
+@media (prefers-reduced-motion: reduce) { #btnVoice.recording { animation: none; } }
+.voice-status { align-self: center; font-size: 0.85rem; color: var(--muted); background: var(--bubble); border: 1px solid var(--line); border-radius: 999px; padding: 3px 14px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 拖曳圖片進聊天室時的提示框 */
+#chatView.dropping .chat-list { outline: 3px dashed var(--accent); outline-offset: -10px; }
 
 /* ---------- 輸入區 ---------- */
 .composer-wrap {

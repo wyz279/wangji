@@ -164,6 +164,7 @@ async function addMessage(msg) {
 }
 
 async function sendText() {
+  if (recognizer) recognizer.stop();
   const input = $("#textInput");
   const text = input.value.trim();
   if (!text) return;
@@ -182,6 +183,79 @@ async function sendImages(files) {
     } catch (e) {
       toast(e.message);
     }
+  }
+}
+
+/* ---------- 貼上／拖曳圖片 ---------- */
+// 從剪貼簿或拖曳進來的資料裡挑出圖片檔
+const imageFilesOf = (dataTransfer) => [...(dataTransfer?.files || [])].filter((f) => f.type.startsWith("image/"));
+
+function onPaste(e) {
+  const files = imageFilesOf(e.clipboardData);
+  if (!files.length) return; // 沒有圖片：照常貼上文字
+  e.preventDefault();
+  sendImages(files);
+  toast(files.length > 1 ? `已傳送 ${files.length} 張圖片` : "已傳送圖片");
+}
+
+/* ---------- 語音輸入 ---------- */
+// 用瀏覽器內建的語音辨識（Edge、Chrome 支援；Firefox 不支援就把按鈕藏起來）
+// 辨識好的文字填進輸入框，讓使用者先修改再送出
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognizer = null;
+let voiceBase = ""; // 開始錄音前輸入框原本的文字
+
+function toggleVoice() {
+  if (recognizer) return recognizer.stop();
+  const input = $("#textInput");
+  const status = $("#voiceStatus");
+  recognizer = new SpeechRecognition();
+  recognizer.lang = "zh-TW";
+  recognizer.continuous = true;
+  recognizer.interimResults = true;
+  voiceBase = input.value;
+
+  recognizer.onstart = () => {
+    $("#btnVoice").classList.add("recording");
+    $("#btnVoice").textContent = "⏹";
+    status.hidden = false;
+    status.textContent = "🎤 聽你說…（再按一次停止）";
+  };
+  recognizer.onresult = (e) => {
+    let finalText = "";
+    let interim = "";
+    for (let i = 0; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) finalText += t;
+      else interim += t;
+    }
+    input.value = voiceBase + finalText;
+    autoGrow();
+    status.textContent = interim ? `🎤 ${interim}` : "🎤 聽你說…（再按一次停止）";
+  };
+  recognizer.onerror = (e) => {
+    const msg =
+      e.error === "not-allowed" || e.error === "service-not-allowed"
+        ? "沒有麥克風權限，請在網址列左邊允許使用麥克風"
+        : e.error === "no-speech"
+          ? "沒有聽到聲音"
+          : e.error === "network"
+            ? "語音辨識需要網路"
+            : `語音辨識出錯（${e.error}）`;
+    toast(msg);
+  };
+  recognizer.onend = () => {
+    recognizer = null;
+    $("#btnVoice").classList.remove("recording");
+    $("#btnVoice").textContent = "🎤";
+    status.hidden = true;
+    input.focus();
+  };
+  try {
+    recognizer.start();
+  } catch (err) {
+    recognizer = null;
+    toast(`無法開始語音輸入：${err.message}`);
   }
 }
 
@@ -1044,6 +1118,29 @@ function bind() {
     }
   });
   $("#textInput").addEventListener("input", autoGrow);
+  $("#textInput").addEventListener("paste", onPaste);
+  // 把圖片檔拖進聊天室就傳送
+  const chatView = $("#chatView");
+  chatView.addEventListener("dragover", (e) => {
+    if ([...(e.dataTransfer?.types || [])].includes("Files")) {
+      e.preventDefault();
+      chatView.classList.add("dropping");
+    }
+  });
+  chatView.addEventListener("dragleave", (e) => {
+    if (!chatView.contains(e.relatedTarget)) chatView.classList.remove("dropping");
+  });
+  chatView.addEventListener("drop", (e) => {
+    chatView.classList.remove("dropping");
+    const files = imageFilesOf(e.dataTransfer);
+    if (!files.length) return;
+    e.preventDefault();
+    sendImages(files);
+  });
+  if (SpeechRecognition) {
+    $("#btnVoice").hidden = false;
+    $("#btnVoice").addEventListener("click", toggleVoice);
+  }
   $("#imageInput").addEventListener("change", (e) => {
     sendImages([...e.target.files]);
     e.target.value = "";

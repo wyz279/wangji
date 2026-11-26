@@ -26,13 +26,15 @@
   <div class="composer-wrap">
     <button id="btnGenerate" class="generate-btn">✨ 一鍵整理</button>
     <div id="stickerPanel" class="sticker-panel" hidden></div>
+    <div id="voiceStatus" class="voice-status" hidden></div>
     <form id="composer" class="composer">
       <label class="icon-btn" title="上傳照片">
         📷
         <input id="imageInput" type="file" accept="image/*" multiple hidden>
       </label>
       <button type="button" id="btnStickers" class="icon-btn plain" title="貼圖">😊</button>
-      <textarea id="textInput" rows="1" placeholder="想到什麼就丟進來…"></textarea>
+      <button type="button" id="btnVoice" class="icon-btn plain" title="語音輸入" hidden>🎤</button>
+      <textarea id="textInput" rows="1" placeholder="想到什麼就丟進來…（可以直接貼上圖片）"></textarea>
       <button type="submit" class="send-btn">送出</button>
     </form>
   </div>
