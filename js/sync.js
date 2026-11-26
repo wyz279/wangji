@@ -143,6 +143,18 @@ const Sync = (() => {
       await jDir.removeEntry(`${name}.md`).catch(() => {});
     });
 
+  // 一次刪除很多則訊息（刪除手札時）：受影響的日子各重寫一次 raw，照片和自訂貼圖檔一起刪
+  const removedMany = (list, allMessages) =>
+    safe(async () => {
+      const days = [...new Set(list.map((m) => dayKey(m.timestamp)))];
+      for (const key of days) await writeRawDay(key, allMessages);
+      const imgDir = await dir(await dir(root, "raw"), "images");
+      for (const m of list) {
+        const f = m.type === "image" ? `${m.id}.jpg` : m.type === "sticker" && m.blob ? `${m.id}.png` : null;
+        if (f) await imgDir.removeEntry(f).catch(() => {});
+      }
+    });
+
   // 刪除訊息：重寫當天 raw，照片檔也一起刪掉
   const removed = (msg, allMessages) =>
     safe(async () => {
@@ -165,5 +177,5 @@ const Sync = (() => {
     return ok && !warned;
   }
 
-  return { init, link, reconnect, status, message, journal, journalRemoved, removed, all };
+  return { init, link, reconnect, status, message, journal, journalRemoved, removed, removedMany, all };
 })();

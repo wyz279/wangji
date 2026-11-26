@@ -663,16 +663,23 @@ function editJournal(j) {
   };
 }
 
+// 刪除手札：連同它整理的原始紀錄（文字、照片、貼圖）一起刪掉，無法復原
 async function deleteJournal(j) {
-  if (!confirm(`確定要刪除 ${Render.dayLabel(j)} 這篇手札嗎？\n\n原本的紀錄會回到聊天室，可以修改後重新整理。`)) return;
-  const back = messages.filter((m) => m.journal_id === j.id);
-  back.forEach((m) => (m.journal_id = null));
-  await DB.putMany("messages", back);
+  const gone = messages.filter((m) => m.journal_id === j.id);
+  const ok = confirm(
+    `確定要刪除 ${Render.dayLabel(j)} 這篇手札嗎？\n\n` +
+      `刪除後無法復原，這篇手札整理的 ${gone.length} 則原始紀錄（包含照片和貼圖）也會一起刪除，不會回到聊天室。`
+  );
+  if (!ok) return;
   await DB.remove("journals", j.id);
+  for (const m of gone) await DB.remove("messages", m.id);
   journals = journals.filter((x) => x.id !== j.id);
+  const goneIds = new Set(gone.map((m) => m.id));
+  messages = messages.filter((m) => !goneIds.has(m.id));
   Sync.journalRemoved(j);
+  Sync.removedMany(gone, messages);
   showJournalList();
-  toast(`已刪除手札，${back.length} 則紀錄回到聊天室`);
+  toast("已刪除這篇手札和它的原始紀錄");
 }
 
 function turnTo(dir) {
