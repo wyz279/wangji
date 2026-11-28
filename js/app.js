@@ -987,6 +987,14 @@ function applyChatBg(blob) {
 /* ---------- 設定 ---------- */
 const tail = (k) => (k ? `${k.slice(0, 4)}…${k.slice(-4)}` : "");
 
+// Groq 只在建立 Key 時顯示完整的 Key，之後後台列表只顯示部分（中間被遮住），複製那個是不能用的
+function keyProblem(k) {
+  if (/\.\.\.|…|\*/.test(k)) return "這看起來是 Groq 後台遮住一部分的 Key。完整的 Key 只在建立時顯示一次，找不到的話請重新建立一把";
+  if (!k.startsWith("gsk_")) return "Groq 的 Key 應該是 gsk_ 開頭，請確認有沒有複製完整";
+  if (k.length < 40) return `這把 Key 只有 ${k.length} 個字元，太短了，可能沒有複製完整（完整的 Key 只在建立時顯示一次）`;
+  return "";
+}
+
 async function openSettings() {
   const input = $("#keyInput");
   const status = $("#keyStatus");
@@ -997,6 +1005,8 @@ async function openSettings() {
   $("#btnTestKey").onclick = async () => {
     const key = input.value.trim();
     if (!key) return (status.textContent = "請先貼上 Key");
+    const problem = keyProblem(key);
+    if (problem) return (status.textContent = `⚠️ ${problem}`);
     status.textContent = `測試 ${tail(key)} 中…`;
     try {
       await Gen.testKey(key);
@@ -1077,13 +1087,18 @@ async function openSettings() {
 
   $("#btnSample").onclick = async () => {
     if (messages.some((m) => m.sample)) return (status.textContent = "測試資料已經載入過了，要重來請先清除所有紀錄");
-    const sample = await buildSampleMessages();
+    status.textContent = "載入測試資料中…";
+    const { list: sample, usedFallback } = await buildSampleMessages();
     await DB.putMany("messages", sample);
     messages.push(...sample);
     Sync.all(messages, journals);
     $("#settingsDlg").close("cancel");
     showView("chat");
-    toast(`已載入 ${sample.length} 則測試紀錄，按「一鍵整理」試試看`);
+    toast(
+      usedFallback
+        ? `已載入 ${sample.length} 則測試紀錄。範例照片讀不到（直接開檔會被瀏覽器擋），先用示意圖代替；用 Live Server 或線上版就能看到真的照片`
+        : `已載入 ${sample.length} 則測試紀錄，按「一鍵整理」試試看`
+    );
   };
 
   $("#btnClearAll").onclick = async () => {
@@ -1098,6 +1113,7 @@ async function openSettings() {
 
   if ((await ask($("#settingsDlg"))) === "save") {
     const key = input.value.trim();
+    if (key && keyProblem(key) && !confirm(`${keyProblem(key)}。\n\n還是要儲存嗎？`)) return;
     if (key) localStorage.setItem(KEY_STORAGE, key);
     else localStorage.removeItem(KEY_STORAGE);
     toast(key ? "已儲存 API Key" : "已清除 API Key");

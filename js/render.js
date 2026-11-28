@@ -581,7 +581,7 @@ const Render = (() => {
             </div>`
           )
           .join("");
-        return `<div class="edit-box">
+        return `<div class="jedit-box">
           <div class="edit-head"><span>${esc(label)}</span>${layoutSel}</div>
           ${text}
           ${photos || stks ? `<div class="edit-media">${photos}${stks ? `<div class="edit-stickers">${stks}</div>` : ""}</div>` : ""}
