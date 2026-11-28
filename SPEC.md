@@ -37,18 +37,20 @@ wangji/
 ├── index.html            # 唯一頁面：聊天室畫面 + 手札畫面 + 設定
 ├── css/
 │   ├── base.css          # 版面、元件
-│   └── themes.css        # 3 種畫面主題（CSS 變數）
+│   └── themes.css        # 6 種畫面主題（CSS 變數）
 ├── js/
 │   ├── sample.js         # 測試資料（照片在 assets/sample/）
 │   ├── stickers.js       # 內建貼圖、自訂貼圖壓縮
 │   ├── sync.js           # 本機資料夾同步
 │   ├── app.js            # 畫面切換、事件綁定
 │   ├── db.js             # IndexedDB 讀寫
-│   ├── prompts.js        # 4 種文字風格的 prompt
+│   ├── prompts.js        # 6 種文字風格的 prompt、照片版型
 │   ├── generate.js       # 呼叫 Groq + 驗證 + 重試
 │   └── render.js         # 把手札 JSON 渲染成 HTML
 ├── docs/
 │   └── screenshots/      # Demo 截圖
+├── assets/
+│   └── sample/           # 測試資料照片（已去除拍攝資訊；原圖在 _originals/，不上傳）
 ├── test/
 │   └── groq-test.html    # Groq 直連測試頁
 ├── data/                 # 本機同步的 raw/ 與 journals/（不上傳 GitHub）
@@ -236,7 +238,7 @@ wangji/
 - 自己的貼圖：上傳圖片（縮到 320px、存 PNG 保留透明背景），上傳時填「含意」，只給 AI 參考、畫面不顯示；貼圖庫存在 `meta.customStickers`。
 - 訊息格式：`{ id: "stk_...", type: "sticker", timestamp, emoji, label: "" }` 或自訂的 `{ ..., label, blob, custom: true }`（圖片複製一份在訊息裡，從貼圖庫移除也不影響已傳出的）。
 - 送給 AI：寫成 `[貼圖：😭]`（自訂貼圖寫含意），只當作當下情緒的參考，prompt 規定不能把貼圖寫成事件；「原始」風格不送貼圖。
-- 手札裡：程式依時間把貼圖放進對應段落（跟照片補位同一套時間規則），像貼紙一樣歪歪的、白色描邊＋陰影，**留在紙張框內不超出**；極簡備忘錄的貼圖排在右上角。角度和左右用貼圖 id 算出來，每次打開都一樣。
+- 手札裡：程式依時間把貼圖放進對應段落（跟照片補位同一套時間規則），像貼紙一樣歪歪的、白色描邊＋陰影，**留在紙張框內不超出**；「備忘」的貼圖排在右上角。角度和左右用貼圖 id 算出來，每次打開都一樣。
 
 **原文對照**
 - 閱讀頁「🔍 對照原文」：左邊是原始紀錄（時間、原話、照片縮圖、貼圖），右邊是整理後的段落，依時間一段一段對齊（備忘錄是整份對整份）。最上面顯示「原始 N 則、X 字 → 整理後 M 段、Y 字」。
